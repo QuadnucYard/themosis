@@ -1,0 +1,36 @@
+{
+  "color": {
+    "$type": "color",
+    "primary": {
+      "$value": {
+        "colorSpace": "srgb",
+        "components": [0.12, 0.32, 0.84],
+        "alpha": 1.0
+      }
+    },
+    "accent": {
+      "$value": "{color.primary}"
+    }
+  },
+  "spacing": {
+    "$type": "dimension",
+    "small": {
+      "$value": {
+        "value": 4,
+        "unit": "px"
+      }
+    }
+  },
+  "opacity": {
+    "$type": "number",
+    "$value": 0.8
+  },
+  "enabled": {
+    "$type": "boolean",
+    "$value": true
+  },
+  "label": {
+    "$type": "string",
+    "$value": "Primary"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "$unknown": true,
+  "missing_type": {
+    "$value": 10
+  },
+  "unsupported": {
+    "$type": "gradient",
+    "$value": []
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "bad": {
+    "$type": "color",
+    "$value": {
+      "colorSpace": "srgb",
+      "components": [1.2, 0.0, 0.0],
+      "alpha": 1.0
+    }
+  }
+}

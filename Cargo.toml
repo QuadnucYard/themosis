@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/themosis-core"]
+members = ["crates/themosis-core", "crates/themosis-tokens"]
 resolver = "2"
 
 [workspace.package]
@@ -12,6 +12,7 @@ publish = false
 [workspace.dependencies]
 themosis-core = { path = "crates/themosis-core", version = "0.1.0" }
 
+serde_json = "1.0"
 thiserror = "2.0"
 
 [workspace.lints.rust]
