@@ -19,6 +19,7 @@ target/
 !Cargo.toml
 !Cargo.lock
 !rust-toolchain.toml
+!rustfmt.toml
 !justfile
 
 # Source code
