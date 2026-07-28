@@ -1,0 +1,26 @@
+# Ignore build artifacts
+target/
+.DS_Store
+
+# Ignore everything else at root
+/*
+
+# Repository metadata
+!.gitignore
+!.github/
+
+# Documentation
+!README.md
+!LICENSE
+!docs/
+!docs/**
+
+# Workspace configuration
+!Cargo.toml
+!Cargo.lock
+!rust-toolchain.toml
+!justfile
+
+# Source code
+!crates/
+!crates/**
