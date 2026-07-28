@@ -9,4 +9,8 @@ mod source;
 mod token;
 
 pub use source::{InvalidSpan, SourceId, Span};
-pub use token::{InvalidTokenPath, TokenPath};
+pub use token::{
+    Color, Dimension, DimensionUnit, InvalidColor, InvalidNumber, InvalidTokenDefinition,
+    InvalidTokenPath, Number, TokenDefinition, TokenDocument, TokenExpression, TokenKind,
+    TokenPath, TokenValue,
+};
