@@ -2,10 +2,19 @@ use std::collections::{BTreeMap, BTreeSet, btree_map::Entry};
 
 use themosis_core::{
     CompiledState, CompiledStyle, CompiledTheme, CompiledValue, Name, PropertyAssignment,
-    ResolvedTokens, StyleDefinition, StyleDocument, StyleValue,
+    ResolvedTokens, SourceId, StyleDefinition, StyleDocument, StyleValue,
 };
 
-use crate::{CompileError, CompileErrors};
+use crate::{
+    CompileError, CompileErrors,
+    diagnostics::{DiagnosticLabel, closest_name, closest_token},
+};
+
+#[derive(Clone)]
+struct LocatedStyleDefinition {
+    definition: StyleDefinition,
+    source: SourceId,
+}
 
 /// Compiles component styles against an already resolved token registry.
 pub fn compile_styles(
@@ -13,28 +22,57 @@ pub fn compile_styles(
     tokens: ResolvedTokens,
 ) -> Result<CompiledTheme, CompileErrors> {
     let Some(first) = documents.first() else {
-        return Err(CompileErrors(vec![CompileError::NoStyleDocuments]));
+        let mut errors = CompileErrors::default();
+        errors.push(CompileError::NoStyleDocuments, Vec::new(), None);
+        return Err(errors);
     };
     let theme_name = first.name().clone();
     let mut definitions = BTreeMap::new();
-    let mut errors = Vec::new();
+    let first_source = first.source();
+    let mut errors = CompileErrors::default();
 
     for document in documents {
         if document.name() != &theme_name {
-            errors.push(CompileError::ThemeNameMismatch {
-                expected: theme_name.clone(),
-                found: document.name().clone(),
-            });
+            errors.push(
+                CompileError::ThemeNameMismatch {
+                    expected: theme_name.clone(),
+                    found: document.name().clone(),
+                },
+                vec![
+                    DiagnosticLabel::secondary(first_source, None, "theme name established here"),
+                    DiagnosticLabel::primary(document.source(), None, "conflicting theme name"),
+                ],
+                None,
+            );
         }
         for style in document.styles() {
+            let located = LocatedStyleDefinition {
+                definition: style.clone(),
+                source: document.source(),
+            };
             match definitions.entry(style.name().clone()) {
                 Entry::Vacant(entry) => {
-                    entry.insert(style.clone());
+                    entry.insert(located);
                 }
                 Entry::Occupied(entry) => {
-                    errors.push(CompileError::DuplicateStyle {
-                        style: entry.key().clone(),
-                    });
+                    errors.push(
+                        CompileError::DuplicateStyle {
+                            style: entry.key().clone(),
+                        },
+                        vec![
+                            DiagnosticLabel::secondary(
+                                entry.get().source,
+                                entry.get().definition.span(),
+                                "first declaration",
+                            ),
+                            DiagnosticLabel::primary(
+                                document.source(),
+                                style.span(),
+                                "duplicate declaration",
+                            ),
+                        ],
+                        None,
+                    );
                 }
             }
         }
@@ -43,14 +81,14 @@ pub fn compile_styles(
     let compiled = {
         let mut resolver = StyleResolver::new(definitions, &tokens);
         resolver.resolve_all();
-        errors.append(&mut resolver.errors);
+        errors.append(std::mem::take(&mut resolver.errors));
         resolver.into_compiled()
     };
 
     if errors.is_empty() {
         Ok(CompiledTheme::new(theme_name, tokens, compiled))
     } else {
-        Err(CompileErrors(errors))
+        Err(errors)
     }
 }
 
@@ -62,23 +100,26 @@ struct PartialStyle {
 }
 
 struct StyleResolver<'a> {
-    definitions: BTreeMap<Name, StyleDefinition>,
+    definitions: BTreeMap<Name, LocatedStyleDefinition>,
     tokens: &'a ResolvedTokens,
     resolved: BTreeMap<Name, PartialStyle>,
     failed: BTreeSet<Name>,
     visiting: Vec<Name>,
-    errors: Vec<CompileError>,
+    errors: CompileErrors,
 }
 
 impl<'a> StyleResolver<'a> {
-    fn new(definitions: BTreeMap<Name, StyleDefinition>, tokens: &'a ResolvedTokens) -> Self {
+    fn new(
+        definitions: BTreeMap<Name, LocatedStyleDefinition>,
+        tokens: &'a ResolvedTokens,
+    ) -> Self {
         Self {
             definitions,
             tokens,
             resolved: BTreeMap::new(),
             failed: BTreeSet::new(),
             visiting: Vec::new(),
-            errors: Vec::new(),
+            errors: CompileErrors::default(),
         }
     }
 
@@ -102,7 +143,19 @@ impl<'a> StyleResolver<'a> {
             for member in &cycle {
                 self.failed.insert(member.clone());
             }
-            self.errors.push(CompileError::InheritanceCycle { cycle });
+            let labels = cycle
+                .iter()
+                .filter_map(|member| self.definitions.get(member))
+                .map(|definition| {
+                    DiagnosticLabel::primary(
+                        definition.source,
+                        definition.definition.span(),
+                        "cycle member",
+                    )
+                })
+                .collect();
+            self.errors
+                .push(CompileError::InheritanceCycle { cycle }, labels, None);
             return None;
         }
 
@@ -129,23 +182,50 @@ impl<'a> StyleResolver<'a> {
         }
     }
 
-    fn resolve_definition(&mut self, definition: &StyleDefinition) -> Option<PartialStyle> {
+    fn resolve_definition(&mut self, located: &LocatedStyleDefinition) -> Option<PartialStyle> {
+        let definition = &located.definition;
         let mut style = if let Some(parent_name) = definition.extends() {
             if !self.definitions.contains_key(parent_name) {
-                self.errors.push(CompileError::MissingParent {
-                    style: definition.name().clone(),
-                    parent: parent_name.clone(),
-                });
+                let suggestion = closest_name(parent_name, self.definitions.keys())
+                    .map(|candidate| format!("did you mean '{candidate}'?"));
+                self.errors.push(
+                    CompileError::MissingParent {
+                        style: definition.name().clone(),
+                        parent: parent_name.clone(),
+                    },
+                    vec![DiagnosticLabel::primary(
+                        located.source,
+                        definition.span(),
+                        "missing parent referenced here",
+                    )],
+                    suggestion,
+                );
                 return None;
             }
             let parent = self.resolve(parent_name)?;
             if parent.target != *definition.target() {
-                self.errors.push(CompileError::TargetMismatch {
-                    style: definition.name().clone(),
-                    target: definition.target().clone(),
-                    parent: parent_name.clone(),
-                    parent_target: parent.target,
-                });
+                let mut labels = vec![DiagnosticLabel::primary(
+                    located.source,
+                    definition.span(),
+                    "child target declared here",
+                )];
+                if let Some(parent_definition) = self.definitions.get(parent_name) {
+                    labels.push(DiagnosticLabel::secondary(
+                        parent_definition.source,
+                        parent_definition.definition.span(),
+                        "parent target declared here",
+                    ));
+                }
+                self.errors.push(
+                    CompileError::TargetMismatch {
+                        style: definition.name().clone(),
+                        target: definition.target().clone(),
+                        parent: parent_name.clone(),
+                        parent_target: parent.target,
+                    },
+                    labels,
+                    None,
+                );
                 return None;
             }
             parent
@@ -157,32 +237,60 @@ impl<'a> StyleResolver<'a> {
             }
         };
 
-        let properties = self.compile_properties(definition, None, definition.properties());
+        let properties =
+            self.compile_properties(definition, located.source, None, definition.properties());
         self.merge_properties(
             definition,
+            located.source,
             None,
             &mut style.properties,
             &BTreeMap::new(),
             properties,
         );
 
-        let mut seen_states = BTreeSet::new();
+        let mut seen_states = BTreeMap::new();
         for state in definition.states() {
-            if !seen_states.insert(state.name().clone()) {
-                self.errors.push(CompileError::DuplicateState {
-                    style: definition.name().clone(),
-                    state: state.name().clone(),
-                });
+            if let Some(first_span) = seen_states.insert(state.name().clone(), state.span()) {
+                self.errors.push(
+                    CompileError::DuplicateState {
+                        style: definition.name().clone(),
+                        state: state.name().clone(),
+                    },
+                    vec![
+                        DiagnosticLabel::secondary(
+                            located.source,
+                            first_span,
+                            "first state declaration",
+                        ),
+                        DiagnosticLabel::primary(
+                            located.source,
+                            state.span(),
+                            "duplicate state declaration",
+                        ),
+                    ],
+                    None,
+                );
                 continue;
             }
-            let properties =
-                self.compile_properties(definition, Some(state.name()), state.properties());
+            let properties = self.compile_properties(
+                definition,
+                located.source,
+                Some(state.name()),
+                state.properties(),
+            );
             let base = style.properties.clone();
             let overrides = style
                 .state_overrides
                 .entry(state.name().clone())
                 .or_default();
-            self.merge_properties(definition, Some(state.name()), overrides, &base, properties);
+            self.merge_properties(
+                definition,
+                located.source,
+                Some(state.name()),
+                overrides,
+                &base,
+                properties,
+            );
         }
 
         Some(style)
@@ -191,6 +299,7 @@ impl<'a> StyleResolver<'a> {
     fn compile_properties(
         &mut self,
         style: &StyleDefinition,
+        source: SourceId,
         state: Option<&Name>,
         assignments: &[PropertyAssignment],
     ) -> BTreeMap<Name, CompiledValue> {
@@ -204,12 +313,23 @@ impl<'a> StyleResolver<'a> {
                 StyleValue::Token(path) => match self.tokens.get(path) {
                     Some(value) => Some(CompiledValue::from(value.clone())),
                     None => {
-                        self.errors.push(CompileError::MissingToken {
-                            style: style.name().clone(),
-                            state: state.cloned(),
-                            property: assignment.name().clone(),
-                            token: path.clone(),
-                        });
+                        let suggestion =
+                            closest_token(path, self.tokens.iter().map(|(candidate, _)| candidate))
+                                .map(|candidate| format!("did you mean '{candidate}'?"));
+                        self.errors.push(
+                            CompileError::MissingToken {
+                                style: style.name().clone(),
+                                state: state.cloned(),
+                                property: assignment.name().clone(),
+                                token: path.clone(),
+                            },
+                            vec![DiagnosticLabel::primary(
+                                source,
+                                assignment.span(),
+                                "unresolved token reference",
+                            )],
+                            suggestion,
+                        );
                         None
                     }
                 },
@@ -223,11 +343,30 @@ impl<'a> StyleResolver<'a> {
                     entry.insert(value);
                 }
                 Entry::Occupied(entry) => {
-                    self.errors.push(CompileError::DuplicateProperty {
-                        style: style.name().clone(),
-                        state: state.cloned(),
-                        property: entry.key().clone(),
-                    });
+                    let first_span = assignments
+                        .iter()
+                        .find(|candidate| candidate.name() == entry.key())
+                        .and_then(PropertyAssignment::span);
+                    self.errors.push(
+                        CompileError::DuplicateProperty {
+                            style: style.name().clone(),
+                            state: state.cloned(),
+                            property: entry.key().clone(),
+                        },
+                        vec![
+                            DiagnosticLabel::secondary(
+                                source,
+                                first_span,
+                                "first property assignment",
+                            ),
+                            DiagnosticLabel::primary(
+                                source,
+                                assignment.span(),
+                                "duplicate property assignment",
+                            ),
+                        ],
+                        None,
+                    );
                 }
             }
         }
@@ -237,6 +376,7 @@ impl<'a> StyleResolver<'a> {
     fn merge_properties(
         &mut self,
         style: &StyleDefinition,
+        source: SourceId,
         state: Option<&Name>,
         destination: &mut BTreeMap<Name, CompiledValue>,
         fallback: &BTreeMap<Name, CompiledValue>,
@@ -246,13 +386,21 @@ impl<'a> StyleResolver<'a> {
             let expected = destination.get(&name).or_else(|| fallback.get(&name));
             if let Some(expected) = expected {
                 if expected.kind() != value.kind() {
-                    self.errors.push(CompileError::PropertyTypeMismatch {
-                        style: style.name().clone(),
-                        state: state.cloned(),
-                        property: name,
-                        expected: expected.kind(),
-                        actual: value.kind(),
-                    });
+                    self.errors.push(
+                        CompileError::PropertyTypeMismatch {
+                            style: style.name().clone(),
+                            state: state.cloned(),
+                            property: name,
+                            expected: expected.kind(),
+                            actual: value.kind(),
+                        },
+                        vec![DiagnosticLabel::primary(
+                            source,
+                            style.span(),
+                            "incompatible override",
+                        )],
+                        None,
+                    );
                     continue;
                 }
             }
@@ -525,5 +673,45 @@ mod tests {
             CompileError::PropertyTypeMismatch { style, property, .. }
                 if style == &name("StringChild") && property == &name("font-size")
         )));
+    }
+
+    #[test]
+    fn reports_spanned_missing_tokens_with_a_suggestion() {
+        let source = SourceId::new(9);
+        let assignment = PropertyAssignment::spanned(
+            name("background"),
+            StyleValue::Token(path("color.primray")),
+            themosis_core::Span::new(source, 24..54).expect("span is ordered"),
+        );
+        let definition = StyleDefinition::spanned(
+            name("PrimaryButton"),
+            name("Button"),
+            None,
+            vec![assignment],
+            Vec::new(),
+            themosis_core::Span::new(source, 0..56).expect("span is ordered"),
+        );
+        let document = StyleDocument::new(
+            source,
+            name("Application"),
+            Vec::new(),
+            Vec::new(),
+            vec![definition],
+        );
+
+        let errors =
+            compile_styles(&[document], resolved_tokens()).expect_err("token is misspelled");
+
+        assert_eq!(errors.errors()[0].code(), "TMS2207");
+        assert_eq!(
+            errors.metadata()[0].labels()[0]
+                .span()
+                .map(themosis_core::Span::range),
+            Some(24..54)
+        );
+        assert_eq!(
+            errors.metadata()[0].suggestion(),
+            Some("did you mean 'color.primary'?")
+        );
     }
 }

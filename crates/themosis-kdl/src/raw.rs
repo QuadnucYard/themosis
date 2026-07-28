@@ -9,6 +9,8 @@ pub(crate) enum RawRoot {
 #[derive(knus::Decode)]
 #[knus(span_type = Span)]
 pub(crate) struct RawTheme {
+    #[knus(span)]
+    pub(crate) span: Span,
     #[knus(argument)]
     pub(crate) name: String,
     #[knus(children)]
@@ -26,6 +28,8 @@ pub(crate) enum RawThemeChild {
 #[derive(knus::Decode)]
 #[knus(span_type = Span)]
 pub(crate) struct RawSourcePath {
+    #[knus(span)]
+    pub(crate) span: Span,
     #[knus(argument)]
     pub(crate) path: String,
 }
@@ -33,6 +37,8 @@ pub(crate) struct RawSourcePath {
 #[derive(knus::Decode)]
 #[knus(span_type = Span)]
 pub(crate) struct RawStyle {
+    #[knus(span)]
+    pub(crate) span: Span,
     #[knus(argument)]
     pub(crate) name: String,
     #[knus(property)]
@@ -57,6 +63,8 @@ pub(crate) enum RawStyleChild {
 #[derive(knus::Decode)]
 #[knus(span_type = Span)]
 pub(crate) struct RawState {
+    #[knus(span)]
+    pub(crate) span: Span,
     #[knus(argument)]
     pub(crate) name: String,
     #[knus(children)]
@@ -76,6 +84,8 @@ pub(crate) enum RawProperty {
 #[derive(knus::Decode)]
 #[knus(span_type = Span)]
 pub(crate) struct RawBooleanProperty {
+    #[knus(span)]
+    pub(crate) span: Span,
     #[knus(argument)]
     pub(crate) name: String,
     #[knus(argument)]
@@ -85,6 +95,8 @@ pub(crate) struct RawBooleanProperty {
 #[derive(knus::Decode)]
 #[knus(span_type = Span)]
 pub(crate) struct RawNumberProperty {
+    #[knus(span)]
+    pub(crate) span: Span,
     #[knus(argument)]
     pub(crate) name: String,
     #[knus(argument)]
@@ -94,6 +106,8 @@ pub(crate) struct RawNumberProperty {
 #[derive(knus::Decode)]
 #[knus(span_type = Span)]
 pub(crate) struct RawStringProperty {
+    #[knus(span)]
+    pub(crate) span: Span,
     #[knus(argument)]
     pub(crate) name: String,
     #[knus(argument)]

@@ -12,6 +12,17 @@ pub enum ParseError {
     Structure(#[source] StructureErrors),
 }
 
+impl ParseError {
+    /// Returns the stable diagnostic code for this parse failure.
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::Decode(_) => "TMS1001",
+            Self::Structure(_) => "TMS1002",
+        }
+    }
+}
+
 /// One decoded value that violates the KDL format contract.
 #[derive(Clone, Debug, Eq, PartialEq, Error)]
 #[error("{context}: {message}{}", format_span(.span))]
@@ -27,6 +38,14 @@ impl StructureError {
             context: context.into(),
             message: message.into(),
             span: None,
+        }
+    }
+
+    pub(crate) fn at(context: impl Into<String>, message: impl Into<String>, span: Span) -> Self {
+        Self {
+            context: context.into(),
+            message: message.into(),
+            span: Some(span),
         }
     }
 

@@ -111,3 +111,53 @@ fn rejects_dependencies_that_escape_the_theme_root() {
         }
     ));
 }
+
+#[test]
+fn renders_semantic_diagnostics_with_source_names_and_suggestions() {
+    let mut provider = MemorySourceProvider::new();
+    provider
+        .insert(
+            "theme.kdl",
+            concat!(
+                "theme \"Application\" {\n",
+                "    tokens \"tokens.json\"\n",
+                "    style \"PrimaryButton\" target=\"Button\" {\n",
+                "        token \"background\" \"color.primray\"\n",
+                "    }\n",
+                "}\n",
+            ),
+        )
+        .expect("path is valid");
+    provider
+        .insert(
+            "tokens.json",
+            r#"{"color":{"$type":"color","primary":{"$value":{"colorSpace":"srgb","components":[0.1,0.2,0.3],"alpha":1.0}}}}"#,
+        )
+        .expect("path is valid");
+
+    let error = compile_theme(&provider, "theme.kdl").expect_err("token is misspelled");
+    let rendered = error.to_string();
+
+    assert!(rendered.contains("error[TMS2207]"));
+    assert!(rendered.contains("theme.kdl:"));
+    assert!(rendered.contains("did you mean 'color.primary'?"));
+}
+
+#[test]
+fn root_document_establishes_the_theme_name() {
+    let mut provider = MemorySourceProvider::new();
+    provider
+        .insert(
+            "z-root.kdl",
+            "theme \"Application\" {\n    import \"a-import.kdl\"\n}\n",
+        )
+        .expect("path is valid");
+    provider
+        .insert("a-import.kdl", "theme \"WrongName\" {}\n")
+        .expect("path is valid");
+
+    let error = compile_theme(&provider, "z-root.kdl").expect_err("theme names conflict");
+    let rendered = error.to_string();
+
+    assert!(rendered.contains("uses theme 'WrongName', expected 'Application'"));
+}

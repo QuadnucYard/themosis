@@ -2,7 +2,7 @@ use std::fmt;
 
 use thiserror::Error;
 
-use crate::{Number, SourceId, TokenPath};
+use crate::{Number, SourceId, Span, TokenPath};
 
 /// Non-empty name used by theme, style, state, and property declarations.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -112,13 +112,28 @@ pub enum StyleValue {
 pub struct PropertyAssignment {
     name: Name,
     value: StyleValue,
+    span: Option<Span>,
 }
 
 impl PropertyAssignment {
     /// Creates a property assignment.
     #[must_use]
     pub const fn new(name: Name, value: StyleValue) -> Self {
-        Self { name, value }
+        Self {
+            name,
+            value,
+            span: None,
+        }
+    }
+
+    /// Creates a property assignment with parser provenance.
+    #[must_use]
+    pub const fn spanned(name: Name, value: StyleValue, span: Span) -> Self {
+        Self {
+            name,
+            value,
+            span: Some(span),
+        }
     }
 
     /// Returns the property name.
@@ -132,6 +147,12 @@ impl PropertyAssignment {
     pub const fn value(&self) -> &StyleValue {
         &self.value
     }
+
+    /// Returns the declaration span when available.
+    #[must_use]
+    pub const fn span(&self) -> Option<Span> {
+        self.span
+    }
 }
 
 /// Explicit control state and its property overrides.
@@ -139,13 +160,28 @@ impl PropertyAssignment {
 pub struct StyleState {
     name: Name,
     properties: Vec<PropertyAssignment>,
+    span: Option<Span>,
 }
 
 impl StyleState {
     /// Creates an explicit state.
     #[must_use]
     pub const fn new(name: Name, properties: Vec<PropertyAssignment>) -> Self {
-        Self { name, properties }
+        Self {
+            name,
+            properties,
+            span: None,
+        }
+    }
+
+    /// Creates an explicit state with parser provenance.
+    #[must_use]
+    pub const fn spanned(name: Name, properties: Vec<PropertyAssignment>, span: Span) -> Self {
+        Self {
+            name,
+            properties,
+            span: Some(span),
+        }
     }
 
     /// Returns the state name.
@@ -159,6 +195,12 @@ impl StyleState {
     pub fn properties(&self) -> &[PropertyAssignment] {
         &self.properties
     }
+
+    /// Returns the declaration span when available.
+    #[must_use]
+    pub const fn span(&self) -> Option<Span> {
+        self.span
+    }
 }
 
 /// Component style and its explicit states.
@@ -169,6 +211,7 @@ pub struct StyleDefinition {
     extends: Option<Name>,
     properties: Vec<PropertyAssignment>,
     states: Vec<StyleState>,
+    span: Option<Span>,
 }
 
 impl StyleDefinition {
@@ -187,6 +230,27 @@ impl StyleDefinition {
             extends,
             properties,
             states,
+            span: None,
+        }
+    }
+
+    /// Creates a component style with parser provenance.
+    #[must_use]
+    pub const fn spanned(
+        name: Name,
+        target: Name,
+        extends: Option<Name>,
+        properties: Vec<PropertyAssignment>,
+        states: Vec<StyleState>,
+        span: Span,
+    ) -> Self {
+        Self {
+            name,
+            target,
+            extends,
+            properties,
+            states,
+            span: Some(span),
         }
     }
 
@@ -218,6 +282,12 @@ impl StyleDefinition {
     #[must_use]
     pub fn states(&self) -> &[StyleState] {
         &self.states
+    }
+
+    /// Returns the declaration span when available.
+    #[must_use]
+    pub const fn span(&self) -> Option<Span> {
+        self.span
     }
 }
 

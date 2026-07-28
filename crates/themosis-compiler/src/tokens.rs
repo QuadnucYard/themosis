@@ -1,27 +1,56 @@
 use std::collections::{BTreeMap, BTreeSet, btree_map::Entry};
 
 use themosis_core::{
-    ResolvedTokens, TokenDefinition, TokenDocument, TokenExpression, TokenPath, TokenValue,
+    ResolvedTokens, SourceId, TokenDefinition, TokenDocument, TokenExpression, TokenPath,
+    TokenValue,
 };
 
-use crate::{CompileError, CompileErrors};
+use crate::{
+    CompileError, CompileErrors,
+    diagnostics::{DiagnosticLabel, closest_token},
+};
+
+#[derive(Clone)]
+struct LocatedTokenDefinition {
+    definition: TokenDefinition,
+    source: SourceId,
+}
 
 /// Merges and resolves token declarations from all supplied documents.
 pub fn resolve_tokens(documents: &[TokenDocument]) -> Result<ResolvedTokens, CompileErrors> {
     let mut definitions = BTreeMap::new();
-    let mut errors = Vec::new();
+    let mut errors = CompileErrors::default();
 
     for document in documents {
         for definition in document.tokens() {
             let path = definition.path().clone();
+            let located = LocatedTokenDefinition {
+                definition: definition.clone(),
+                source: document.source(),
+            };
             match definitions.entry(path) {
                 Entry::Vacant(entry) => {
-                    entry.insert(definition.clone());
+                    entry.insert(located);
                 }
                 Entry::Occupied(entry) => {
-                    errors.push(CompileError::DuplicateToken {
-                        path: entry.key().clone(),
-                    });
+                    errors.push(
+                        CompileError::DuplicateToken {
+                            path: entry.key().clone(),
+                        },
+                        vec![
+                            DiagnosticLabel::secondary(
+                                entry.get().source,
+                                None,
+                                "first declaration",
+                            ),
+                            DiagnosticLabel::primary(
+                                document.source(),
+                                None,
+                                "duplicate declaration",
+                            ),
+                        ],
+                        None,
+                    );
                 }
             }
         }
@@ -29,31 +58,31 @@ pub fn resolve_tokens(documents: &[TokenDocument]) -> Result<ResolvedTokens, Com
 
     let mut resolver = Resolver::new(definitions);
     resolver.resolve_all();
-    errors.extend(resolver.errors);
+    errors.append(resolver.errors);
 
     if errors.is_empty() {
         Ok(ResolvedTokens::new(resolver.resolved))
     } else {
-        Err(CompileErrors(errors))
+        Err(errors)
     }
 }
 
 struct Resolver {
-    definitions: BTreeMap<TokenPath, TokenDefinition>,
+    definitions: BTreeMap<TokenPath, LocatedTokenDefinition>,
     resolved: BTreeMap<TokenPath, TokenValue>,
     failed: BTreeSet<TokenPath>,
     visiting: Vec<TokenPath>,
-    errors: Vec<CompileError>,
+    errors: CompileErrors,
 }
 
 impl Resolver {
-    fn new(definitions: BTreeMap<TokenPath, TokenDefinition>) -> Self {
+    fn new(definitions: BTreeMap<TokenPath, LocatedTokenDefinition>) -> Self {
         Self {
             definitions,
             resolved: BTreeMap::new(),
             failed: BTreeSet::new(),
             visiting: Vec::new(),
-            errors: Vec::new(),
+            errors: CompileErrors::default(),
         }
     }
 
@@ -77,20 +106,29 @@ impl Resolver {
             for member in &cycle {
                 self.failed.insert(member.clone());
             }
-            self.errors.push(CompileError::AliasCycle { cycle });
+            let labels = cycle
+                .iter()
+                .filter_map(|member| self.definitions.get(member))
+                .map(|definition| DiagnosticLabel::primary(definition.source, None, "cycle member"))
+                .collect();
+            self.errors
+                .push(CompileError::AliasCycle { cycle }, labels, None);
             return None;
         }
 
-        let definition = self
+        let located = self
             .definitions
             .get(path)
             .expect("resolver is only entered for known token paths")
             .clone();
+        let definition = located.definition;
         self.visiting.push(path.clone());
 
         let value = match definition.expression() {
             TokenExpression::Literal(value) => Some(value.clone()),
-            TokenExpression::Alias(target) => self.resolve_alias(&definition, target),
+            TokenExpression::Alias(target) => {
+                self.resolve_alias(&definition, located.source, target)
+            }
         };
 
         let popped = self.visiting.pop();
@@ -111,23 +149,46 @@ impl Resolver {
     fn resolve_alias(
         &mut self,
         definition: &TokenDefinition,
+        source: SourceId,
         target: &TokenPath,
     ) -> Option<TokenValue> {
         if !self.definitions.contains_key(target) {
-            self.errors.push(CompileError::MissingAlias {
-                token: definition.path().clone(),
-                target: target.clone(),
-            });
+            let suggestion = closest_token(target, self.definitions.keys())
+                .map(|candidate| format!("did you mean '{{{candidate}}}'?"));
+            self.errors.push(
+                CompileError::MissingAlias {
+                    token: definition.path().clone(),
+                    target: target.clone(),
+                },
+                vec![DiagnosticLabel::primary(source, None, "unresolved alias")],
+                suggestion,
+            );
             return None;
         }
 
         let value = self.resolve(target)?;
         if value.kind() != definition.kind() {
-            self.errors.push(CompileError::TypeMismatch {
-                token: definition.path().clone(),
-                declared: definition.kind(),
-                actual: value.kind(),
-            });
+            let mut labels = vec![DiagnosticLabel::primary(
+                source,
+                None,
+                "alias has the wrong type",
+            )];
+            if let Some(target) = self.definitions.get(target) {
+                labels.push(DiagnosticLabel::secondary(
+                    target.source,
+                    None,
+                    "target declared here",
+                ));
+            }
+            self.errors.push(
+                CompileError::TypeMismatch {
+                    token: definition.path().clone(),
+                    declared: definition.kind(),
+                    actual: value.kind(),
+                },
+                labels,
+                None,
+            );
             return None;
         }
 

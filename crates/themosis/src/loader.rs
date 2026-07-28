@@ -7,7 +7,7 @@ use themosis_compiler::{CompileErrors, compile_styles, resolve_tokens};
 use themosis_core::{CompiledTheme, SourceId, StyleDocument, TokenDocument};
 use thiserror::Error;
 
-use crate::{InvalidSourcePath, SourceProvider, SourceReadError, paths::normalize};
+use crate::{InvalidSourcePath, SourceReadError, paths::normalize, provider::SourceProvider};
 
 /// Compiles a root KDL document and its complete declared dependency tree.
 pub fn compile_theme(
@@ -20,11 +20,28 @@ pub fn compile_theme(
         source,
     })?;
     let mut loader = Loader::new(provider);
-    loader.load_style(root)?;
-    let tokens = resolve_tokens(&loader.tokens.into_values().collect::<Vec<_>>())
-        .map_err(LoadError::Compile)?;
-    compile_styles(&loader.styles.into_values().collect::<Vec<_>>(), tokens)
-        .map_err(LoadError::Compile)
+    loader.load_style(root.clone())?;
+    let source_names = loader
+        .source_paths
+        .iter()
+        .map(|(source, path)| (*source, path.display().to_string()))
+        .collect::<BTreeMap<_, _>>();
+    let token_documents = loader.tokens.into_values().collect::<Vec<_>>();
+    let root_document = loader
+        .styles
+        .remove(&root)
+        .expect("a successfully loaded root document is retained by the loader");
+    let style_documents = std::iter::once(root_document)
+        .chain(loader.styles.into_values())
+        .collect::<Vec<_>>();
+    let tokens = resolve_tokens(&token_documents).map_err(|source| LoadError::Compile {
+        source,
+        sources: source_names.clone(),
+    })?;
+    compile_styles(&style_documents, tokens).map_err(|source| LoadError::Compile {
+        source,
+        sources: source_names,
+    })
 }
 
 struct Loader<'a, P> {
@@ -32,6 +49,7 @@ struct Loader<'a, P> {
     next_source: u32,
     styles: BTreeMap<PathBuf, StyleDocument>,
     tokens: BTreeMap<PathBuf, TokenDocument>,
+    source_paths: BTreeMap<SourceId, PathBuf>,
     visiting: Vec<PathBuf>,
 }
 
@@ -42,14 +60,17 @@ impl<'a, P: SourceProvider> Loader<'a, P> {
             next_source: 0,
             styles: BTreeMap::new(),
             tokens: BTreeMap::new(),
+            source_paths: BTreeMap::new(),
             visiting: Vec::new(),
         }
     }
 
-    fn source_id(&mut self) -> Result<SourceId, LoadError> {
+    fn source_id(&mut self, path: &Path) -> Result<SourceId, LoadError> {
         let current = self.next_source;
         self.next_source = current.checked_add(1).ok_or(LoadError::TooManySources)?;
-        Ok(SourceId::new(current))
+        let source = SourceId::new(current);
+        self.source_paths.insert(source, path.to_path_buf());
+        Ok(source)
     }
 
     fn load_style(&mut self, path: PathBuf) -> Result<(), LoadError> {
@@ -68,7 +89,7 @@ impl<'a, P: SourceProvider> Loader<'a, P> {
 
         self.visiting.push(path.clone());
         let source = self.read(&path)?;
-        let source_id = self.source_id()?;
+        let source_id = self.source_id(&path)?;
         let document =
             themosis_kdl::parse(&path.to_string_lossy(), source_id, &source).map_err(|source| {
                 LoadError::Kdl {
@@ -97,7 +118,7 @@ impl<'a, P: SourceProvider> Loader<'a, P> {
             return Ok(());
         }
         let source = self.read(&path)?;
-        let source_id = self.source_id()?;
+        let source_id = self.source_id(&path)?;
         let document =
             themosis_tokens::parse(source_id, &source).map_err(|source| LoadError::Tokens {
                 path: path.clone(),
@@ -178,8 +199,14 @@ pub enum LoadError {
     #[error("theme contains too many sources")]
     TooManySources,
     /// Parsed documents failed semantic compilation.
-    #[error("theme compilation failed: {0}")]
-    Compile(CompileErrors),
+    #[error("theme compilation failed:\n{}", format_compile_failure(.source, .sources))]
+    Compile {
+        /// Semantic diagnostics.
+        #[source]
+        source: CompileErrors,
+        /// Root-relative source names keyed by compiler identity.
+        sources: BTreeMap<SourceId, String>,
+    },
 }
 
 fn format_invalid_path(owner: &Option<PathBuf>, path: &Path, source: &InvalidSourcePath) -> String {
@@ -199,4 +226,8 @@ fn format_path_cycle(cycle: &[PathBuf]) -> String {
         .map(|path| path.display().to_string())
         .collect::<Vec<_>>()
         .join(" -> ")
+}
+
+fn format_compile_failure(source: &CompileErrors, sources: &BTreeMap<SourceId, String>) -> String {
+    source.render_with_source_names(sources)
 }

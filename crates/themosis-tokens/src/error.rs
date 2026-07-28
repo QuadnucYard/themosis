@@ -29,6 +29,16 @@ impl ParseError {
         }
     }
 
+    /// Returns the stable diagnostic code for this parse failure.
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        if self.line.is_some() {
+            "TMS1101"
+        } else {
+            "TMS1102"
+        }
+    }
+
     /// Returns the JSON path associated with the error.
     #[must_use]
     pub fn path(&self) -> &str {
@@ -91,7 +101,7 @@ fn format_parse_error(
 fn format_parse_errors(errors: &[ParseError]) -> String {
     errors
         .iter()
-        .map(|error| format!("{error}"))
+        .map(|error| format!("error[{}]: {error}", error.code()))
         .collect::<Vec<_>>()
         .join("\n")
 }

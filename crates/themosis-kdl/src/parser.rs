@@ -30,8 +30,8 @@ pub fn parse(file_name: &str, source: SourceId, input: &str) -> Result<StyleDocu
         .into_iter()
         .next()
         .expect("length was checked before extracting the root");
-    let mut converter = Converter::default();
-    let document = converter.convert_theme(source, theme);
+    let mut converter = Converter::new(source);
+    let document = converter.convert_theme(theme);
 
     if converter.errors.is_empty() {
         document.ok_or_else(|| {
@@ -45,14 +45,27 @@ pub fn parse(file_name: &str, source: SourceId, input: &str) -> Result<StyleDocu
     }
 }
 
-#[derive(Default)]
 struct Converter {
+    source: SourceId,
     errors: Vec<StructureError>,
 }
 
 impl Converter {
-    fn convert_theme(&mut self, source: SourceId, raw: RawTheme) -> Option<StyleDocument> {
-        let name = self.name("theme", raw.name);
+    fn new(source: SourceId) -> Self {
+        Self {
+            source,
+            errors: Vec::new(),
+        }
+    }
+
+    fn span(&self, span: knus::span::Span) -> themosis_core::Span {
+        themosis_core::Span::new(self.source, span.0..span.1)
+            .expect("knus always returns ordered source spans")
+    }
+
+    fn convert_theme(&mut self, raw: RawTheme) -> Option<StyleDocument> {
+        let theme_span = self.span(raw.span);
+        let name = self.name("theme", raw.name, theme_span);
         let mut token_sources = Vec::new();
         let mut imports = Vec::new();
         let mut styles = Vec::new();
@@ -60,12 +73,14 @@ impl Converter {
         for child in raw.children {
             match child {
                 RawThemeChild::Tokens(raw) => {
-                    if let Some(path) = self.source_path("tokens", raw.path) {
+                    let span = self.span(raw.span);
+                    if let Some(path) = self.source_path("tokens", raw.path, span) {
                         token_sources.push(path);
                     }
                 }
                 RawThemeChild::Import(raw) => {
-                    if let Some(path) = self.source_path("import", raw.path) {
+                    let span = self.span(raw.span);
+                    if let Some(path) = self.source_path("import", raw.path, span) {
                         imports.push(path);
                     }
                 }
@@ -78,7 +93,7 @@ impl Converter {
         }
 
         Some(StyleDocument::new(
-            source,
+            self.source,
             name?,
             token_sources,
             imports,
@@ -87,12 +102,13 @@ impl Converter {
     }
 
     fn convert_style(&mut self, raw: RawStyle) -> Option<StyleDefinition> {
+        let span = self.span(raw.span);
         let context = format!("style '{}'", raw.name);
-        let name = self.name(&context, raw.name);
-        let target = self.name(&format!("{context} target"), raw.target);
+        let name = self.name(&context, raw.name, span);
+        let target = self.name(&format!("{context} target"), raw.target, span);
         let extends = raw
             .extends
-            .and_then(|value| self.name(&format!("{context} extends"), value));
+            .and_then(|value| self.name(&format!("{context} extends"), value, span));
         let mut properties = Vec::new();
         let mut states = Vec::new();
 
@@ -131,14 +147,15 @@ impl Converter {
             }
         }
 
-        Some(StyleDefinition::new(
-            name?, target?, extends, properties, states,
+        Some(StyleDefinition::spanned(
+            name?, target?, extends, properties, states, span,
         ))
     }
 
     fn convert_state(&mut self, style_context: &str, raw: RawState) -> Option<StyleState> {
+        let span = self.span(raw.span);
         let context = format!("{style_context} state '{}'", raw.name);
-        let name = self.name(&context, raw.name);
+        let name = self.name(&context, raw.name, span);
         let mut properties = Vec::new();
 
         for property in raw.properties {
@@ -154,7 +171,7 @@ impl Converter {
             }
         }
 
-        Some(StyleState::new(name?, properties))
+        Some(StyleState::spanned(name?, properties, span))
     }
 
     fn convert_boolean(
@@ -162,10 +179,12 @@ impl Converter {
         context: &str,
         raw: RawBooleanProperty,
     ) -> Option<PropertyAssignment> {
-        let name = self.name(&format!("{context} property"), raw.name)?;
-        Some(PropertyAssignment::new(
+        let span = self.span(raw.span);
+        let name = self.name(&format!("{context} property"), raw.name, span)?;
+        Some(PropertyAssignment::spanned(
             name,
             StyleValue::Boolean(raw.value),
+            span,
         ))
     }
 
@@ -174,25 +193,36 @@ impl Converter {
         context: &str,
         raw: RawNumberProperty,
     ) -> Option<PropertyAssignment> {
+        let span = self.span(raw.span);
         let property_context = format!("{context} property '{}'", raw.name);
-        let name = self.name(&property_context, raw.name)?;
+        let name = self.name(&property_context, raw.name, span)?;
         let raw_value = match literal_number(&raw.value) {
             Ok(value) => value,
             Err(error) => {
-                self.errors
-                    .push(StructureError::new(property_context, error.to_string()));
+                self.errors.push(StructureError::at(
+                    property_context,
+                    error.to_string(),
+                    span,
+                ));
                 return None;
             }
         };
         let value = match Number::new(raw_value) {
             Ok(value) => value,
             Err(error) => {
-                self.errors
-                    .push(StructureError::new(property_context, error.to_string()));
+                self.errors.push(StructureError::at(
+                    property_context,
+                    error.to_string(),
+                    span,
+                ));
                 return None;
             }
         };
-        Some(PropertyAssignment::new(name, StyleValue::Number(value)))
+        Some(PropertyAssignment::spanned(
+            name,
+            StyleValue::Number(value),
+            span,
+        ))
     }
 
     fn convert_string(
@@ -200,8 +230,13 @@ impl Converter {
         context: &str,
         raw: RawStringProperty,
     ) -> Option<PropertyAssignment> {
-        let name = self.name(&format!("{context} property"), raw.name)?;
-        Some(PropertyAssignment::new(name, StyleValue::String(raw.value)))
+        let span = self.span(raw.span);
+        let name = self.name(&format!("{context} property"), raw.name, span)?;
+        Some(PropertyAssignment::spanned(
+            name,
+            StyleValue::String(raw.value),
+            span,
+        ))
     }
 
     fn convert_token(
@@ -209,17 +244,25 @@ impl Converter {
         context: &str,
         raw: RawStringProperty,
     ) -> Option<PropertyAssignment> {
+        let span = self.span(raw.span);
         let property_context = format!("{context} property '{}'", raw.name);
-        let name = self.name(&property_context, raw.name)?;
+        let name = self.name(&property_context, raw.name, span)?;
         let path = match TokenPath::from_str(&raw.value) {
             Ok(path) => path,
             Err(error) => {
-                self.errors
-                    .push(StructureError::new(property_context, error.to_string()));
+                self.errors.push(StructureError::at(
+                    property_context,
+                    error.to_string(),
+                    span,
+                ));
                 return None;
             }
         };
-        Some(PropertyAssignment::new(name, StyleValue::Token(path)))
+        Some(PropertyAssignment::spanned(
+            name,
+            StyleValue::Token(path),
+            span,
+        ))
     }
 
     fn convert_resource(
@@ -227,38 +270,49 @@ impl Converter {
         context: &str,
         raw: RawStringProperty,
     ) -> Option<PropertyAssignment> {
+        let span = self.span(raw.span);
         let property_context = format!("{context} property '{}'", raw.name);
-        let name = self.name(&property_context, raw.name)?;
+        let name = self.name(&property_context, raw.name, span)?;
         let reference = match ResourceRef::new(raw.value) {
             Ok(reference) => reference,
             Err(error) => {
-                self.errors
-                    .push(StructureError::new(property_context, error.to_string()));
+                self.errors.push(StructureError::at(
+                    property_context,
+                    error.to_string(),
+                    span,
+                ));
                 return None;
             }
         };
-        Some(PropertyAssignment::new(
+        Some(PropertyAssignment::spanned(
             name,
             StyleValue::Resource(reference),
+            span,
         ))
     }
 
-    fn name(&mut self, context: &str, value: String) -> Option<Name> {
+    fn name(&mut self, context: &str, value: String, span: themosis_core::Span) -> Option<Name> {
         match Name::new(value) {
             Ok(name) => Some(name),
             Err(error) => {
                 self.errors
-                    .push(StructureError::new(context, error.to_string()));
+                    .push(StructureError::at(context, error.to_string(), span));
                 None
             }
         }
     }
 
-    fn source_path(&mut self, context: &str, value: String) -> Option<String> {
+    fn source_path(
+        &mut self,
+        context: &str,
+        value: String,
+        span: themosis_core::Span,
+    ) -> Option<String> {
         if value.is_empty() || value.trim() != value {
-            self.errors.push(StructureError::new(
+            self.errors.push(StructureError::at(
                 context,
                 "source path must be non-empty and have no surrounding whitespace",
+                span,
             ));
             None
         } else {

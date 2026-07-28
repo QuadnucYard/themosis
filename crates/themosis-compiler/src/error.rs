@@ -1,5 +1,3 @@
-use std::fmt;
-
 use themosis_core::{CompiledValueKind, Name, TokenKind, TokenPath};
 use thiserror::Error;
 
@@ -128,6 +126,29 @@ pub enum CompileError {
     },
 }
 
+impl CompileError {
+    /// Returns the stable diagnostic code for this semantic failure.
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::NoStyleDocuments => "TMS2001",
+            Self::ThemeNameMismatch { .. } => "TMS2002",
+            Self::DuplicateToken { .. } => "TMS2101",
+            Self::MissingAlias { .. } => "TMS2102",
+            Self::AliasCycle { .. } => "TMS2103",
+            Self::TypeMismatch { .. } => "TMS2104",
+            Self::DuplicateStyle { .. } => "TMS2201",
+            Self::MissingParent { .. } => "TMS2202",
+            Self::InheritanceCycle { .. } => "TMS2203",
+            Self::TargetMismatch { .. } => "TMS2204",
+            Self::DuplicateState { .. } => "TMS2205",
+            Self::DuplicateProperty { .. } => "TMS2206",
+            Self::MissingToken { .. } => "TMS2207",
+            Self::PropertyTypeMismatch { .. } => "TMS2208",
+        }
+    }
+}
+
 fn format_cycle<T: std::fmt::Display>(cycle: &[T]) -> String {
     cycle
         .iter()
@@ -175,29 +196,3 @@ fn format_property_type_mismatch(
         ),
     }
 }
-
-/// All semantic compilation errors collected in deterministic order.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CompileErrors(pub(crate) Vec<CompileError>);
-
-impl CompileErrors {
-    /// Returns collected errors.
-    #[must_use]
-    pub fn errors(&self) -> &[CompileError] {
-        &self.0
-    }
-}
-
-impl fmt::Display for CompileErrors {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (index, error) in self.0.iter().enumerate() {
-            if index > 0 {
-                formatter.write_str("\n")?;
-            }
-            write!(formatter, "{error}")?;
-        }
-        Ok(())
-    }
-}
-
-impl std::error::Error for CompileErrors {}
