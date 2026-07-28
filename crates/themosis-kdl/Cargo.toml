@@ -1,0 +1,17 @@
+[package]
+name = "themosis-kdl"
+description = "KDL component-style input for Themosis"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+themosis-core.workspace = true
+
+knus.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
