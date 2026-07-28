@@ -222,6 +222,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "themosis"
+version = "0.1.0"
+dependencies = [
+ "themosis-compiler",
+ "themosis-core",
+ "themosis-kdl",
+ "themosis-tokens",
+ "thiserror",
+]
+
+[[package]]
 name = "themosis-compiler"
 version = "0.1.0"
 dependencies = [
