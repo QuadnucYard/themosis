@@ -6,9 +6,14 @@
 #![forbid(unsafe_code)]
 
 mod source;
+mod style;
 mod token;
 
 pub use source::{InvalidSpan, SourceId, Span};
+pub use style::{
+    InvalidName, InvalidResourceRef, Name, PropertyAssignment, ResourceRef, StyleDefinition,
+    StyleDocument, StyleState, StyleValue,
+};
 pub use token::{
     Color, Dimension, DimensionUnit, InvalidColor, InvalidNumber, InvalidTokenDefinition,
     InvalidTokenPath, Number, TokenDefinition, TokenDocument, TokenExpression, TokenKind,
