@@ -16,6 +16,6 @@ pub use style::{
 };
 pub use token::{
     Color, Dimension, DimensionUnit, InvalidColor, InvalidNumber, InvalidTokenDefinition,
-    InvalidTokenPath, Number, TokenDefinition, TokenDocument, TokenExpression, TokenKind,
-    TokenPath, TokenValue,
+    InvalidTokenPath, Number, ResolvedTokens, TokenDefinition, TokenDocument, TokenExpression,
+    TokenKind, TokenPath, TokenValue,
 };

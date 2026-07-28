@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use thiserror::Error;
 
 use crate::{Color, Dimension, Number, SourceId, TokenPath};
@@ -141,6 +143,45 @@ impl TokenDocument {
     }
 }
 
+/// Canonically ordered token values after semantic resolution.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResolvedTokens {
+    values: BTreeMap<TokenPath, TokenValue>,
+}
+
+impl ResolvedTokens {
+    /// Creates a registry from resolved path/value pairs.
+    #[must_use]
+    pub fn new(values: impl IntoIterator<Item = (TokenPath, TokenValue)>) -> Self {
+        Self {
+            values: values.into_iter().collect(),
+        }
+    }
+
+    /// Returns a resolved token value by path.
+    #[must_use]
+    pub fn get(&self, path: &TokenPath) -> Option<&TokenValue> {
+        self.values.get(path)
+    }
+
+    /// Iterates over resolved values in token-path order.
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = (&TokenPath, &TokenValue)> {
+        self.values.iter()
+    }
+
+    /// Returns the number of resolved values.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.values.len()
+    }
+
+    /// Returns whether the registry has no values.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.values.is_empty()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
@@ -159,6 +200,28 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "declared token type Number does not match literal type Boolean"
+        );
+    }
+
+    #[test]
+    fn resolved_tokens_iterate_in_path_order() {
+        let values = ResolvedTokens::new([
+            (
+                TokenPath::from_str("spacing.small").expect("path is valid"),
+                TokenValue::Number(Number::new(4.0).expect("number is finite")),
+            ),
+            (
+                TokenPath::from_str("opacity").expect("path is valid"),
+                TokenValue::Number(Number::new(0.8).expect("number is finite")),
+            ),
+        ]);
+
+        assert_eq!(
+            values
+                .iter()
+                .map(|(path, _)| path.to_string())
+                .collect::<Vec<_>>(),
+            ["opacity", "spacing.small"]
         );
     }
 }

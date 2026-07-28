@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "crates/themosis-compiler",
     "crates/themosis-core",
     "crates/themosis-kdl",
     "crates/themosis-tokens",
