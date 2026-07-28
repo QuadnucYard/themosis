@@ -11,8 +11,9 @@ mod token;
 
 pub use source::{InvalidSpan, SourceId, Span};
 pub use style::{
-    InvalidName, InvalidResourceRef, Name, PropertyAssignment, ResourceRef, StyleDefinition,
-    StyleDocument, StyleState, StyleValue,
+    CompiledState, CompiledStyle, CompiledTheme, CompiledValue, CompiledValueKind, InvalidName,
+    InvalidResourceRef, Name, PropertyAssignment, ResourceRef, StyleDefinition, StyleDocument,
+    StyleState, StyleValue,
 };
 pub use token::{
     Color, Dimension, DimensionUnit, InvalidColor, InvalidNumber, InvalidTokenDefinition,
