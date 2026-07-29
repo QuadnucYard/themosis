@@ -1,6 +1,9 @@
 # Component-style KDL contract
 
-A source contains exactly one `theme` root. JSON token files and imported KDL files are declared explicitly; loading and path normalization are handled by the facade rather than this parser.
+A source is parsed as KDL 2.0 and contains exactly one `theme` root. KDL 1.0
+fallback is not supported. JSON token files and imported KDL files are declared
+explicitly; loading and path normalization are handled by the facade rather
+than this parser.
 
 ```kdl
 theme "dark" {
@@ -10,7 +13,7 @@ theme "dark" {
     style "PrimaryButton" target="Button" extends="BaseButton" {
         token "background" "color.primary"
         number "font-size" 16
-        boolean "disabled" false
+        boolean "disabled" #false
         string "label" "Primary"
         resource "font" "res://fonts/ui.tres"
 
@@ -33,7 +36,7 @@ theme "dark" {
 
 Properties are explicit nodes with two arguments: property name and value.
 
-- `boolean NAME VALUE`
+- `boolean NAME VALUE` accepts `#true` or `#false`.
 - `number NAME VALUE` accepts integer or decimal KDL numbers.
 - `string NAME VALUE`
 - `token NAME TOKEN_PATH` retains an unresolved design-token reference.

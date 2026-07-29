@@ -1,4 +1,4 @@
-theme "Application" {
+theme Application {
     tokens "tokens/theme.tokens.json"
     import "styles/buttons.kdl"
 }

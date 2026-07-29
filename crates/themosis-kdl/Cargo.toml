@@ -10,7 +10,7 @@ publish.workspace = true
 [dependencies]
 themosis-core.workspace = true
 
-knus.workspace = true
+kdl.workspace = true
 thiserror.workspace = true
 
 [lints]

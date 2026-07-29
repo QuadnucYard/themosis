@@ -1,6 +1,6 @@
-theme "dark" {
-    style "PrimaryButton" target="Button" {
-        token "background" "color..primary"
-        resource "font" " padded "
+theme dark {
+    style PrimaryButton target=Button {
+        token background color..primary
+        resource font " padded "
     }
 }

@@ -1,16 +1,16 @@
-theme "Application" {
+theme Application {
     tokens "../tokens/./theme.tokens.json"
 
-    style "BaseButton" target="Button" {
-        token "background" "color.primary"
-        number "font-size" 16
+    style BaseButton target=Button {
+        token background color.primary
+        number font-size 16
 
-        state "hover" {
-            token "background" "color.accent"
+        state hover {
+            token background color.accent
         }
     }
 
-    style "PrimaryButton" target="Button" extends="BaseButton" {
-        number "font-size" 18
+    style PrimaryButton target=Button extends=BaseButton {
+        number font-size 18
     }
 }

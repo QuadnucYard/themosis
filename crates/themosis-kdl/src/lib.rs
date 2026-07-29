@@ -1,10 +1,10 @@
-//! Derive-decoded KDL component-style input for Themosis.
+//! KDL component-style input for Themosis.
 
 #![forbid(unsafe_code)]
 
+mod decode;
 mod error;
 mod parser;
-mod raw;
 
-pub use error::{ParseError, StructureError, StructureErrors};
+pub use error::{ParseError, StructureError, StructureErrors, SyntaxError};
 pub use parser::parse;

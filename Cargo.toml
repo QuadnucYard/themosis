@@ -12,7 +12,7 @@ resolver = "2"
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.95"
 license = "Apache-2.0"
 publish = false
 
@@ -23,7 +23,7 @@ themosis-core = { path = "crates/themosis-core", version = "0.1.0" }
 themosis-kdl = { path = "crates/themosis-kdl", version = "0.1.0" }
 themosis-tokens = { path = "crates/themosis-tokens", version = "0.1.0" }
 
-knus = { version = "=3.4.0", default-features = false, features = ["derive", "line-numbers"] }
+kdl = { version = "=6.7.1", default-features = false, features = ["span"] }
 serde_json = "1.0"
 thiserror = "2.0"
 

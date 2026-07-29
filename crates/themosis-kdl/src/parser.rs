@@ -1,99 +1,107 @@
 use std::str::FromStr;
 
-use knus::ast::{Literal, Radix};
+use kdl::{KdlDocument, KdlNode};
 use themosis_core::{
     Name, Number, PropertyAssignment, ResourceRef, SourceId, StyleDefinition, StyleDocument,
     StyleState, StyleValue, TokenPath,
 };
-use thiserror::Error;
 
 use crate::{
-    error::{ParseError, StructureError, StructureErrors},
-    raw::{
-        RawBooleanProperty, RawNumberProperty, RawProperty, RawRoot, RawState, RawStringProperty,
-        RawStyle, RawStyleChild, RawTheme, RawThemeChild,
-    },
+    decode::{DecodeValue, Decoded, Decoder},
+    error::{ParseError, StructureError, StructureErrors, SyntaxError},
 };
 
-/// Parses one component-style KDL source.
+/// Parses one component-style KDL 2 source.
 pub fn parse(file_name: &str, source: SourceId, input: &str) -> Result<StyleDocument, ParseError> {
-    let roots: Vec<RawRoot> =
-        knus::parse(file_name, input).map_err(|error| ParseError::Decode(Box::new(error)))?;
+    let parsed =
+        KdlDocument::parse_v2(input).map_err(|error| SyntaxError::new(file_name, error))?;
 
-    if roots.len() != 1 {
-        return Err(ParseError::Structure(StructureErrors(vec![
+    if parsed.nodes().len() != 1 {
+        return Err(ParseError::Contract(StructureErrors(vec![
             StructureError::new("document", "expected exactly one theme node"),
         ])));
     }
 
-    let RawRoot::Theme(theme) = roots
-        .into_iter()
-        .next()
-        .expect("length was checked before extracting the root");
-    let mut converter = Converter::new(source);
-    let document = converter.convert_theme(theme);
+    let root = &parsed.nodes()[0];
+    if root.name().value() != "theme" {
+        let decoder = Decoder::new(source);
+        let span = decoder.node_name_span(root);
+        return Err(ParseError::Contract(StructureErrors(vec![
+            StructureError::at(
+                "document",
+                format!("expected theme node, found '{}'", root.name().value()),
+                span,
+            ),
+        ])));
+    }
 
-    if converter.errors.is_empty() {
+    let mut converter = Converter::new(source);
+    let document = converter.convert_theme(root);
+    let errors = converter.into_errors();
+
+    if errors.is_empty() {
         document.ok_or_else(|| {
-            ParseError::Structure(StructureErrors(vec![StructureError::new(
+            ParseError::Contract(StructureErrors(vec![StructureError::new(
                 "theme",
                 "theme could not be converted",
             )]))
         })
     } else {
-        Err(ParseError::Structure(StructureErrors(converter.errors)))
+        Err(ParseError::Contract(StructureErrors(errors)))
     }
 }
 
 struct Converter {
-    source: SourceId,
-    errors: Vec<StructureError>,
+    decoder: Decoder,
 }
 
 impl Converter {
-    fn new(source: SourceId) -> Self {
+    const fn new(source: SourceId) -> Self {
         Self {
-            source,
-            errors: Vec::new(),
+            decoder: Decoder::new(source),
         }
     }
 
-    fn span(&self, span: knus::span::Span) -> themosis_core::Span {
-        themosis_core::Span::new(self.source, span.0..span.1)
-            .expect("knus always returns ordered source spans")
+    fn into_errors(self) -> Vec<StructureError> {
+        self.decoder.into_errors()
     }
 
-    fn convert_theme(&mut self, raw: RawTheme) -> Option<StyleDocument> {
-        let theme_span = self.span(raw.span);
-        let name = self.name("theme", raw.name, theme_span);
+    fn convert_theme(&mut self, node: &KdlNode) -> Option<StyleDocument> {
+        let (raw_name, children) = {
+            let mut raw = self.decoder.node(node, "theme");
+            let name = raw.required_argument::<String>(0, "name");
+            let children = raw.children();
+            raw.finish();
+            (name, children)
+        };
+        let name = raw_name.and_then(|value| self.name("theme", value));
         let mut token_sources = Vec::new();
         let mut imports = Vec::new();
         let mut styles = Vec::new();
 
-        for child in raw.children {
-            match child {
-                RawThemeChild::Tokens(raw) => {
-                    let span = self.span(raw.span);
-                    if let Some(path) = self.source_path("tokens", raw.path, span) {
+        for child in children {
+            match child.name().value() {
+                "tokens" => {
+                    if let Some(path) = self.convert_source_path("tokens", child) {
                         token_sources.push(path);
                     }
                 }
-                RawThemeChild::Import(raw) => {
-                    let span = self.span(raw.span);
-                    if let Some(path) = self.source_path("import", raw.path, span) {
+                "import" => {
+                    if let Some(path) = self.convert_source_path("import", child) {
                         imports.push(path);
                     }
                 }
-                RawThemeChild::Style(raw) => {
-                    if let Some(style) = self.convert_style(raw) {
+                "style" => {
+                    if let Some(style) = self.convert_style(child) {
                         styles.push(style);
                     }
                 }
+                _ => self.decoder.unexpected_node("theme", child),
             }
         }
 
         Some(StyleDocument::new(
-            self.source,
+            self.decoder.source(),
             name?,
             token_sources,
             imports,
@@ -101,49 +109,60 @@ impl Converter {
         ))
     }
 
-    fn convert_style(&mut self, raw: RawStyle) -> Option<StyleDefinition> {
-        let span = self.span(raw.span);
-        let context = format!("style '{}'", raw.name);
-        let name = self.name(&context, raw.name, span);
-        let target = self.name(&format!("{context} target"), raw.target, span);
-        let extends = raw
-            .extends
-            .and_then(|value| self.name(&format!("{context} extends"), value, span));
+    fn convert_source_path(&mut self, context: &str, node: &KdlNode) -> Option<String> {
+        let raw_path = {
+            let mut raw = self.decoder.node(node, context);
+            let path = raw.required_argument::<String>(0, "path");
+            raw.finish();
+            path
+        };
+        self.source_path(context, raw_path?)
+    }
+
+    fn convert_style(&mut self, node: &KdlNode) -> Option<StyleDefinition> {
+        let (span, raw_name, raw_target, raw_extends, children) = {
+            let mut raw = self.decoder.node(node, "style");
+            let span = raw.span();
+            let name = raw.required_argument::<String>(0, "name");
+            let target = raw.required_property::<String>("target");
+            let extends = raw.optional_property::<String>("extends");
+            let children = raw.children();
+            raw.finish();
+            (span, name, target, extends, children)
+        };
+        let context = raw_name.as_ref().map_or_else(
+            || "style".to_owned(),
+            |name| format!("style '{}'", name.value()),
+        );
+        let name = raw_name.and_then(|value| self.name(&context, value));
+        let target = raw_target.and_then(|value| self.name(&format!("{context} target"), value));
+        let extends = raw_extends.and_then(|value| self.name(&format!("{context} extends"), value));
         let mut properties = Vec::new();
         let mut states = Vec::new();
 
-        for child in raw.children {
-            match child {
-                RawStyleChild::State(raw) => {
-                    if let Some(state) = self.convert_state(&context, raw) {
+        for child in children {
+            match child.name().value() {
+                "state" => {
+                    if let Some(state) = self.convert_state(&context, child) {
                         states.push(state);
                     }
                 }
-                RawStyleChild::Boolean(raw) => {
-                    if let Some(property) = self.convert_boolean(&context, raw) {
-                        properties.push(property);
-                    }
+                "boolean" => {
+                    Self::push_property(&mut properties, self.convert_boolean(&context, child))
                 }
-                RawStyleChild::Number(raw) => {
-                    if let Some(property) = self.convert_number(&context, raw) {
-                        properties.push(property);
-                    }
+                "number" => {
+                    Self::push_property(&mut properties, self.convert_number(&context, child))
                 }
-                RawStyleChild::String(raw) => {
-                    if let Some(property) = self.convert_string(&context, raw) {
-                        properties.push(property);
-                    }
+                "string" => {
+                    Self::push_property(&mut properties, self.convert_string(&context, child))
                 }
-                RawStyleChild::Token(raw) => {
-                    if let Some(property) = self.convert_token(&context, raw) {
-                        properties.push(property);
-                    }
+                "token" => {
+                    Self::push_property(&mut properties, self.convert_token(&context, child))
                 }
-                RawStyleChild::Resource(raw) => {
-                    if let Some(property) = self.convert_resource(&context, raw) {
-                        properties.push(property);
-                    }
+                "resource" => {
+                    Self::push_property(&mut properties, self.convert_resource(&context, child))
                 }
+                _ => self.decoder.unexpected_node(&context, child),
             }
         }
 
@@ -152,208 +171,187 @@ impl Converter {
         ))
     }
 
-    fn convert_state(&mut self, style_context: &str, raw: RawState) -> Option<StyleState> {
-        let span = self.span(raw.span);
-        let context = format!("{style_context} state '{}'", raw.name);
-        let name = self.name(&context, raw.name, span);
+    fn convert_state(&mut self, style_context: &str, node: &KdlNode) -> Option<StyleState> {
+        let (span, raw_name, children) = {
+            let mut raw = self.decoder.node(node, format!("{style_context} state"));
+            let span = raw.span();
+            let name = raw.required_argument::<String>(0, "name");
+            let children = raw.children();
+            raw.finish();
+            (span, name, children)
+        };
+        let context = raw_name.as_ref().map_or_else(
+            || format!("{style_context} state"),
+            |name| format!("{style_context} state '{}'", name.value()),
+        );
+        let name = raw_name.and_then(|value| self.name(&context, value));
         let mut properties = Vec::new();
 
-        for property in raw.properties {
-            let property = match property {
-                RawProperty::Boolean(raw) => self.convert_boolean(&context, raw),
-                RawProperty::Number(raw) => self.convert_number(&context, raw),
-                RawProperty::String(raw) => self.convert_string(&context, raw),
-                RawProperty::Token(raw) => self.convert_token(&context, raw),
-                RawProperty::Resource(raw) => self.convert_resource(&context, raw),
+        for child in children {
+            let property = match child.name().value() {
+                "boolean" => self.convert_boolean(&context, child),
+                "number" => self.convert_number(&context, child),
+                "string" => self.convert_string(&context, child),
+                "token" => self.convert_token(&context, child),
+                "resource" => self.convert_resource(&context, child),
+                _ => {
+                    self.decoder.unexpected_node(&context, child);
+                    None
+                }
             };
-            if let Some(property) = property {
-                properties.push(property);
-            }
+            Self::push_property(&mut properties, property);
         }
 
         Some(StyleState::spanned(name?, properties, span))
     }
 
-    fn convert_boolean(
-        &mut self,
-        context: &str,
-        raw: RawBooleanProperty,
-    ) -> Option<PropertyAssignment> {
-        let span = self.span(raw.span);
-        let name = self.name(&format!("{context} property"), raw.name, span)?;
+    fn convert_boolean(&mut self, context: &str, node: &KdlNode) -> Option<PropertyAssignment> {
+        let (span, raw_name, raw_value) = self.decode_property::<bool>(context, node);
+        let property_context = self.property_context(context, raw_name.as_ref());
+        let name = raw_name.and_then(|value| self.name(&property_context, value));
+        let value = raw_value.map(Decoded::into_parts).map(|(value, _)| value);
         Some(PropertyAssignment::spanned(
-            name,
-            StyleValue::Boolean(raw.value),
+            name?,
+            StyleValue::Boolean(value?),
             span,
         ))
     }
 
-    fn convert_number(
-        &mut self,
-        context: &str,
-        raw: RawNumberProperty,
-    ) -> Option<PropertyAssignment> {
-        let span = self.span(raw.span);
-        let property_context = format!("{context} property '{}'", raw.name);
-        let name = self.name(&property_context, raw.name, span)?;
-        let raw_value = match literal_number(&raw.value) {
-            Ok(value) => value,
-            Err(error) => {
-                self.errors.push(StructureError::at(
-                    property_context,
-                    error.to_string(),
-                    span,
-                ));
-                return None;
+    fn convert_number(&mut self, context: &str, node: &KdlNode) -> Option<PropertyAssignment> {
+        let (span, raw_name, raw_value) = self.decode_property::<f64>(context, node);
+        let property_context = self.property_context(context, raw_name.as_ref());
+        let name = raw_name.and_then(|value| self.name(&property_context, value));
+        let value = raw_value.and_then(|value| {
+            let (value, value_span) = value.into_parts();
+            match Number::new(value) {
+                Ok(value) => Some(value),
+                Err(error) => {
+                    self.decoder
+                        .error_at(&property_context, error.to_string(), value_span);
+                    None
+                }
             }
-        };
-        let value = match Number::new(raw_value) {
-            Ok(value) => value,
-            Err(error) => {
-                self.errors.push(StructureError::at(
-                    property_context,
-                    error.to_string(),
-                    span,
-                ));
-                return None;
-            }
-        };
+        });
         Some(PropertyAssignment::spanned(
-            name,
-            StyleValue::Number(value),
+            name?,
+            StyleValue::Number(value?),
             span,
         ))
     }
 
-    fn convert_string(
+    fn convert_string(&mut self, context: &str, node: &KdlNode) -> Option<PropertyAssignment> {
+        let (span, raw_name, raw_value) = self.decode_property::<String>(context, node);
+        let property_context = self.property_context(context, raw_name.as_ref());
+        let name = raw_name.and_then(|value| self.name(&property_context, value));
+        let value = raw_value.map(Decoded::into_parts).map(|(value, _)| value);
+        Some(PropertyAssignment::spanned(
+            name?,
+            StyleValue::String(value?),
+            span,
+        ))
+    }
+
+    fn convert_token(&mut self, context: &str, node: &KdlNode) -> Option<PropertyAssignment> {
+        let (span, raw_name, raw_value) = self.decode_property::<String>(context, node);
+        let property_context = self.property_context(context, raw_name.as_ref());
+        let name = raw_name.and_then(|value| self.name(&property_context, value));
+        let path = raw_value.and_then(|value| {
+            let (value, value_span) = value.into_parts();
+            match TokenPath::from_str(&value) {
+                Ok(path) => Some(path),
+                Err(error) => {
+                    self.decoder
+                        .error_at(&property_context, error.to_string(), value_span);
+                    None
+                }
+            }
+        });
+        Some(PropertyAssignment::spanned(
+            name?,
+            StyleValue::Token(path?),
+            span,
+        ))
+    }
+
+    fn convert_resource(&mut self, context: &str, node: &KdlNode) -> Option<PropertyAssignment> {
+        let (span, raw_name, raw_value) = self.decode_property::<String>(context, node);
+        let property_context = self.property_context(context, raw_name.as_ref());
+        let name = raw_name.and_then(|value| self.name(&property_context, value));
+        let reference = raw_value.and_then(|value| {
+            let (value, value_span) = value.into_parts();
+            match ResourceRef::new(value) {
+                Ok(reference) => Some(reference),
+                Err(error) => {
+                    self.decoder
+                        .error_at(&property_context, error.to_string(), value_span);
+                    None
+                }
+            }
+        });
+        Some(PropertyAssignment::spanned(
+            name?,
+            StyleValue::Resource(reference?),
+            span,
+        ))
+    }
+
+    fn decode_property<T: DecodeValue>(
         &mut self,
         context: &str,
-        raw: RawStringProperty,
-    ) -> Option<PropertyAssignment> {
-        let span = self.span(raw.span);
-        let name = self.name(&format!("{context} property"), raw.name, span)?;
-        Some(PropertyAssignment::spanned(
-            name,
-            StyleValue::String(raw.value),
-            span,
-        ))
+        node: &KdlNode,
+    ) -> (
+        themosis_core::Span,
+        Option<Decoded<String>>,
+        Option<Decoded<T>>,
+    ) {
+        let mut raw = self.decoder.node(node, format!("{context} property"));
+        let span = raw.span();
+        let name = raw.required_argument::<String>(0, "name");
+        let value = raw.required_argument::<T>(1, "value");
+        raw.finish();
+        (span, name, value)
     }
 
-    fn convert_token(
-        &mut self,
-        context: &str,
-        raw: RawStringProperty,
-    ) -> Option<PropertyAssignment> {
-        let span = self.span(raw.span);
-        let property_context = format!("{context} property '{}'", raw.name);
-        let name = self.name(&property_context, raw.name, span)?;
-        let path = match TokenPath::from_str(&raw.value) {
-            Ok(path) => path,
-            Err(error) => {
-                self.errors.push(StructureError::at(
-                    property_context,
-                    error.to_string(),
-                    span,
-                ));
-                return None;
-            }
-        };
-        Some(PropertyAssignment::spanned(
-            name,
-            StyleValue::Token(path),
-            span,
-        ))
-    }
-
-    fn convert_resource(
-        &mut self,
-        context: &str,
-        raw: RawStringProperty,
-    ) -> Option<PropertyAssignment> {
-        let span = self.span(raw.span);
-        let property_context = format!("{context} property '{}'", raw.name);
-        let name = self.name(&property_context, raw.name, span)?;
-        let reference = match ResourceRef::new(raw.value) {
-            Ok(reference) => reference,
-            Err(error) => {
-                self.errors.push(StructureError::at(
-                    property_context,
-                    error.to_string(),
-                    span,
-                ));
-                return None;
-            }
-        };
-        Some(PropertyAssignment::spanned(
-            name,
-            StyleValue::Resource(reference),
-            span,
-        ))
-    }
-
-    fn name(&mut self, context: &str, value: String, span: themosis_core::Span) -> Option<Name> {
+    fn name(&mut self, context: &str, value: Decoded<String>) -> Option<Name> {
+        let (value, span) = value.into_parts();
         match Name::new(value) {
             Ok(name) => Some(name),
             Err(error) => {
-                self.errors
-                    .push(StructureError::at(context, error.to_string(), span));
+                self.decoder.error_at(context, error.to_string(), span);
                 None
             }
         }
     }
 
-    fn source_path(
-        &mut self,
-        context: &str,
-        value: String,
-        span: themosis_core::Span,
-    ) -> Option<String> {
+    fn source_path(&mut self, context: &str, value: Decoded<String>) -> Option<String> {
+        let (value, span) = value.into_parts();
         if value.is_empty() || value.trim() != value {
-            self.errors.push(StructureError::at(
+            self.decoder.error_at(
                 context,
                 "source path must be non-empty and have no surrounding whitespace",
                 span,
-            ));
+            );
             None
         } else {
             Some(value)
         }
     }
-}
 
-fn literal_number(value: &Literal) -> Result<f64, NumberLiteralError> {
-    match value {
-        Literal::Int(value) => match value.0 {
-            Radix::Dec => value
-                .1
-                .parse::<f64>()
-                .map_err(|_| NumberLiteralError::OutOfRange),
-            Radix::Bin | Radix::Oct | Radix::Hex => {
-                let radix = match value.0 {
-                    Radix::Bin => 2,
-                    Radix::Oct => 8,
-                    Radix::Hex => 16,
-                    Radix::Dec => unreachable!("decimal radix handled above"),
-                };
-                i64::from_str_radix(&value.1, radix)
-                    .map(|value| value as f64)
-                    .map_err(|_| NumberLiteralError::OutOfRange)
-            }
-        },
-        Literal::Decimal(value) => value
-            .0
-            .parse::<f64>()
-            .map_err(|_| NumberLiteralError::OutOfRange),
-        Literal::Null | Literal::Bool(_) | Literal::String(_) => Err(NumberLiteralError::WrongType),
+    fn property_context(&self, context: &str, name: Option<&Decoded<String>>) -> String {
+        name.map_or_else(
+            || format!("{context} property"),
+            |name| format!("{context} property '{}'", name.value()),
+        )
     }
-}
 
-#[derive(Clone, Copy, Debug, Error)]
-enum NumberLiteralError {
-    #[error("number property value must be numeric")]
-    WrongType,
-    #[error("number property value is out of range")]
-    OutOfRange,
+    fn push_property(
+        properties: &mut Vec<PropertyAssignment>,
+        property: Option<PropertyAssignment>,
+    ) {
+        if let Some(property) = property {
+            properties.push(property);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -387,6 +385,10 @@ mod tests {
             StyleValue::Number(value) if value.get() == 16.0
         ));
         assert!(matches!(
+            style.properties()[2].value(),
+            StyleValue::Boolean(false)
+        ));
+        assert!(matches!(
             style.properties()[4].value(),
             StyleValue::Resource(reference) if reference.as_str() == "res://fonts/ui.tres"
         ));
@@ -394,28 +396,106 @@ mod tests {
     }
 
     #[test]
-    fn knus_reports_schema_errors() {
+    fn accepts_kdl_2_bare_strings_and_hash_booleans() {
+        let input = "theme dark { style Primary target=Button { boolean disabled #false } }\n";
+        let document = parse("v2.kdl", SourceId::new(0), input).expect("input is valid");
+
+        assert_eq!(document.name().as_str(), "dark");
+        assert!(matches!(
+            document.styles()[0].properties()[0].value(),
+            StyleValue::Boolean(false)
+        ));
+    }
+
+    #[test]
+    fn rejects_kdl_1_boolean_syntax() {
+        let input = "theme dark { style Primary target=Button { boolean disabled false } }\n";
+        let error = parse("v1.kdl", SourceId::new(0), input).expect_err("v1 is not accepted");
+
+        assert_eq!(error.code(), "TMS1001");
+        assert!(matches!(error, ParseError::Syntax(_)));
+        assert!(error.to_string().starts_with("v1.kdl:"));
+    }
+
+    #[test]
+    fn collects_schema_errors() {
         let input = include_str!("../tests/fixtures/invalid/schema.kdl");
         let error = parse("schema.kdl", SourceId::new(0), input).expect_err("fixture is invalid");
+        assert_eq!(error.code(), "TMS1002");
+        let ParseError::Contract(errors) = error else {
+            panic!("expected contract errors");
+        };
+        let messages = errors
+            .errors()
+            .iter()
+            .map(super::StructureError::message)
+            .collect::<Vec<_>>();
 
-        assert!(matches!(error, ParseError::Decode(_)));
+        assert!(messages.contains(&"property 'target' is required"));
+        assert!(messages.contains(&"unexpected node 'unknown'"));
     }
 
     #[test]
     fn collects_core_structure_errors() {
         let input = include_str!("../tests/fixtures/invalid/values.kdl");
         let error = parse("values.kdl", SourceId::new(0), input).expect_err("fixture is invalid");
-        let ParseError::Structure(errors) = error else {
-            panic!("expected structure errors");
+        let ParseError::Contract(errors) = error else {
+            panic!("expected contract errors");
         };
-        let messages: Vec<&str> = errors
+        let messages = errors
             .errors()
             .iter()
             .map(super::StructureError::message)
-            .collect();
+            .collect::<Vec<_>>();
 
         assert!(messages.contains(&"token path segment 1 is empty"));
         assert!(messages.contains(&"resource reference cannot start or end with whitespace"));
+    }
+
+    #[test]
+    fn reports_duplicates_unknown_properties_and_extra_arguments() {
+        let input = r#"
+theme dark {
+    style Primary extra target=Button target=Other unknown=value
+}
+"#;
+        let error = parse("schema.kdl", SourceId::new(0), input).expect_err("input is invalid");
+        let ParseError::Contract(errors) = error else {
+            panic!("expected contract errors");
+        };
+        let messages = errors
+            .errors()
+            .iter()
+            .map(super::StructureError::message)
+            .collect::<Vec<_>>();
+
+        assert!(messages.contains(&"duplicate property 'target'"));
+        assert!(messages.contains(&"unexpected argument"));
+        assert!(messages.contains(&"unexpected property 'unknown'"));
+    }
+
+    #[test]
+    fn schema_type_errors_use_entry_spans() {
+        let input = "theme dark { style Primary target=#true }\n";
+        let error = parse("span.kdl", SourceId::new(6), input).expect_err("target is not a string");
+        let ParseError::Contract(errors) = error else {
+            panic!("expected contract errors");
+        };
+        let span = errors.errors()[0].span().expect("type error is spanned");
+
+        assert_eq!(span.source(), SourceId::new(6));
+        assert_eq!(&input[span.range()], "target=#true");
+    }
+
+    #[test]
+    fn rejects_non_finite_numbers() {
+        let input = "theme dark { style Primary target=Button { number opacity #inf } }\n";
+        let error = parse("number.kdl", SourceId::new(0), input).expect_err("infinity is invalid");
+        let ParseError::Contract(errors) = error else {
+            panic!("expected contract errors");
+        };
+
+        assert!(errors.errors()[0].message().contains("finite"));
     }
 
     #[test]
@@ -423,5 +503,13 @@ mod tests {
         let error = parse("empty.kdl", SourceId::new(0), "").expect_err("root is absent");
 
         assert!(error.to_string().contains("exactly one theme node"));
+    }
+
+    #[test]
+    fn rejects_a_different_root_node() {
+        let input = "styles dark\n";
+        let error = parse("root.kdl", SourceId::new(0), input).expect_err("root name is wrong");
+
+        assert!(error.to_string().contains("expected theme node"));
     }
 }

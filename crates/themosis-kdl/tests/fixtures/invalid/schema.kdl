@@ -1,5 +1,5 @@
-theme "dark" {
-    style "PrimaryButton" {
-        unknown "background" "color.primary"
+theme dark {
+    style PrimaryButton {
+        unknown background color.primary
     }
 }
