@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use themosis::{
     FileSystemSourceProvider, InvalidSourcePath, LoadError, MemorySourceProvider, compile_theme,
+    compile_theme_with_report,
 };
 use themosis_core::{CompiledValue, Name, Number};
 
@@ -59,6 +60,52 @@ fn filesystem_and_memory_compile_the_same_source_tree() {
             .properties()
             .len(),
         2
+    );
+}
+
+#[test]
+fn reports_all_dependencies_after_successful_loading() {
+    let report = compile_theme_with_report(&memory_fixture(), "theme.kdl");
+
+    assert!(report.result().is_ok());
+    assert_eq!(
+        report.dependencies().iter().cloned().collect::<Vec<_>>(),
+        vec![
+            PathBuf::from("styles/buttons.kdl"),
+            PathBuf::from("theme.kdl"),
+            PathBuf::from("tokens/theme.tokens.json"),
+        ]
+    );
+}
+
+#[test]
+fn retains_discovered_dependencies_after_a_read_failure() {
+    let mut provider = MemorySourceProvider::new();
+    provider
+        .insert(
+            "theme.kdl",
+            concat!(
+                "theme \"Application\" {\n",
+                "    tokens \"tokens.json\"\n",
+                "    import \"missing.kdl\"\n",
+                "}\n",
+            ),
+        )
+        .expect("path is valid");
+    provider
+        .insert("tokens.json", r#"{"value":{"$type":"number","$value":1}}"#)
+        .expect("path is valid");
+
+    let report = compile_theme_with_report(&provider, "theme.kdl");
+
+    assert!(report.result().is_err());
+    assert_eq!(
+        report.dependencies().iter().cloned().collect::<Vec<_>>(),
+        vec![
+            PathBuf::from("missing.kdl"),
+            PathBuf::from("theme.kdl"),
+            PathBuf::from("tokens.json"),
+        ]
     );
 }
 

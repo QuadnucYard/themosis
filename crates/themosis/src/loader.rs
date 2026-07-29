@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
 };
 
@@ -14,13 +14,36 @@ pub fn compile_theme(
     provider: &impl SourceProvider,
     root: impl AsRef<Path>,
 ) -> Result<CompiledTheme, LoadError> {
-    let root = normalize(root.as_ref()).map_err(|source| LoadError::InvalidPath {
-        owner: None,
-        path: root.as_ref().to_path_buf(),
-        source,
-    })?;
+    compile_theme_with_report(provider, root).into_result()
+}
+
+/// Compiles a source tree and reports every dependency discovered along the way.
+///
+/// Unlike [`compile_theme`], this preserves the dependency set when loading or
+/// compilation fails. File-watching integrations can therefore retry when a
+/// broken root or any dependency found before the failure changes.
+pub fn compile_theme_with_report(
+    provider: &impl SourceProvider,
+    root: impl AsRef<Path>,
+) -> CompilationReport {
+    let root = match normalize(root.as_ref()) {
+        Ok(root) => root,
+        Err(source) => {
+            return CompilationReport::new(
+                BTreeSet::new(),
+                Err(LoadError::InvalidPath {
+                    owner: None,
+                    path: root.as_ref().to_path_buf(),
+                    source,
+                }),
+            );
+        }
+    };
     let mut loader = Loader::new(provider);
-    loader.load_style(root.clone())?;
+    if let Err(error) = loader.load_style(root.clone()) {
+        return CompilationReport::new(loader.dependencies, Err(error));
+    }
+    let dependencies = loader.dependencies;
     let source_names = loader
         .source_paths
         .iter()
@@ -34,14 +57,50 @@ pub fn compile_theme(
     let style_documents = std::iter::once(root_document)
         .chain(loader.styles.into_values())
         .collect::<Vec<_>>();
-    let tokens = resolve_tokens(&token_documents).map_err(|source| LoadError::Compile {
-        source,
-        sources: source_names.clone(),
-    })?;
-    compile_styles(&style_documents, tokens).map_err(|source| LoadError::Compile {
-        source,
-        sources: source_names,
-    })
+    let result = resolve_tokens(&token_documents)
+        .map_err(|source| LoadError::Compile {
+            source,
+            sources: source_names.clone(),
+        })
+        .and_then(|tokens| {
+            compile_styles(&style_documents, tokens).map_err(|source| LoadError::Compile {
+                source,
+                sources: source_names,
+            })
+        });
+    CompilationReport::new(dependencies, result)
+}
+
+/// Result and source dependencies from one end-to-end compilation attempt.
+#[derive(Debug)]
+pub struct CompilationReport {
+    dependencies: BTreeSet<PathBuf>,
+    result: Result<CompiledTheme, LoadError>,
+}
+
+impl CompilationReport {
+    fn new(dependencies: BTreeSet<PathBuf>, result: Result<CompiledTheme, LoadError>) -> Self {
+        Self {
+            dependencies,
+            result,
+        }
+    }
+
+    /// Returns normalized root-relative paths in deterministic order.
+    #[must_use]
+    pub const fn dependencies(&self) -> &BTreeSet<PathBuf> {
+        &self.dependencies
+    }
+
+    /// Borrows the compiled theme or loading/compilation failure.
+    pub const fn result(&self) -> Result<&CompiledTheme, &LoadError> {
+        self.result.as_ref()
+    }
+
+    /// Consumes the report and returns the ordinary compilation result.
+    pub fn into_result(self) -> Result<CompiledTheme, LoadError> {
+        self.result
+    }
 }
 
 struct Loader<'a, P> {
@@ -51,6 +110,7 @@ struct Loader<'a, P> {
     tokens: BTreeMap<PathBuf, TokenDocument>,
     source_paths: BTreeMap<SourceId, PathBuf>,
     visiting: Vec<PathBuf>,
+    dependencies: BTreeSet<PathBuf>,
 }
 
 impl<'a, P: SourceProvider> Loader<'a, P> {
@@ -62,6 +122,7 @@ impl<'a, P: SourceProvider> Loader<'a, P> {
             tokens: BTreeMap::new(),
             source_paths: BTreeMap::new(),
             visiting: Vec::new(),
+            dependencies: BTreeSet::new(),
         }
     }
 
@@ -74,6 +135,7 @@ impl<'a, P: SourceProvider> Loader<'a, P> {
     }
 
     fn load_style(&mut self, path: PathBuf) -> Result<(), LoadError> {
+        self.dependencies.insert(path.clone());
         if self.styles.contains_key(&path) {
             return Ok(());
         }
@@ -114,6 +176,7 @@ impl<'a, P: SourceProvider> Loader<'a, P> {
     }
 
     fn load_tokens(&mut self, path: PathBuf) -> Result<(), LoadError> {
+        self.dependencies.insert(path.clone());
         if self.tokens.contains_key(&path) {
             return Ok(());
         }

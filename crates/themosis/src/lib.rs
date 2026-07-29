@@ -6,7 +6,7 @@ mod loader;
 mod paths;
 mod provider;
 
-pub use loader::{LoadError, compile_theme};
+pub use loader::{CompilationReport, LoadError, compile_theme, compile_theme_with_report};
 pub use paths::InvalidSourcePath;
 pub use provider::{
     FileSystemSourceProvider, MemorySourceProvider, SourceProvider, SourceReadError,
