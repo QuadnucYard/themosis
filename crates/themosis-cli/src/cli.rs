@@ -4,7 +4,7 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 
-use crate::commands::check::Check;
+use crate::commands::{build::Build, check::Check};
 
 /// Themosis command-line interface.
 #[derive(Debug, Parser)]
@@ -16,6 +16,8 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Generate a targeted backend artifact.
+    Build(Build),
     /// Validate a theme source tree.
     Check(Check),
 }
@@ -24,6 +26,7 @@ enum Command {
 pub(crate) fn run() -> ExitCode {
     match Cli::try_parse() {
         Ok(cli) => match cli.command {
+            Command::Build(command) => command.run(),
             Command::Check(command) => command.run(),
         },
         Err(error) => error.exit(),

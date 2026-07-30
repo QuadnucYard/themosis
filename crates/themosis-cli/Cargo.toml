@@ -11,10 +11,22 @@ publish.workspace = true
 name = "themosis"
 path = "src/main.rs"
 
+[features]
+default = ["godot"]
+godot = [
+    "dep:serde_json",
+    "dep:tempfile",
+    "dep:themosis-godot",
+]
+
 [dependencies]
 themosis.workspace = true
+themosis-core.workspace = true
+themosis-godot = { workspace = true, optional = true }
 
 clap = { version = "4.6", features = ["derive"] }
+serde_json = { workspace = true, optional = true }
+tempfile = { workspace = true, optional = true }
 
 [lints]
 workspace = true
