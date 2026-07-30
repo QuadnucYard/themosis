@@ -1,0 +1,108 @@
+name: Plugin artifact
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: ${{ matrix.platform }} ${{ matrix.architecture }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux
+            architecture: x86_64
+            runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            library: libthemosis_godot.so
+          - platform: windows
+            architecture: x86_64
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            library: themosis_godot.dll
+          - platform: macos
+            architecture: x86_64
+            runner: macos-latest
+            target: x86_64-apple-darwin
+            library: libthemosis_godot.dylib
+          - platform: macos
+            architecture: arm64
+            runner: macos-latest
+            target: aarch64-apple-darwin
+            library: libthemosis_godot.dylib
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Install Rust target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Build native library
+        run: cargo build -p themosis-godot-plugin --release --target ${{ matrix.target }}
+      - name: Stage native library
+        shell: bash
+        run: |
+          mkdir -p "native/${{ matrix.platform }}/${{ matrix.architecture }}"
+          cp "target/${{ matrix.target }}/release/${{ matrix.library }}" "native/${{ matrix.platform }}/${{ matrix.architecture }}/${{ matrix.library }}"
+      - name: Upload native library
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.platform }}-${{ matrix.architecture }}
+          path: native
+          if-no-files-found: error
+
+  package:
+    name: Assemble cross-platform addon
+    needs: native
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Download native libraries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          path: native
+          merge-multiple: true
+      - name: Assemble and verify addon
+        run: ./scripts/package-plugin.sh --native-root "$GITHUB_WORKSPACE/native"
+      - name: Verify tag matches workspace version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: test -f "dist/themosis-godot-${GITHUB_REF_NAME#v}.zip"
+      - name: Upload cross-platform addon
+        uses: actions/upload-artifact@v4
+        with:
+          name: themosis-godot-plugin
+          path: dist/themosis-godot-*.zip
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download packaged addon
+        uses: actions/download-artifact@v4
+        with:
+          name: themosis-godot-plugin
+          path: release-artifact
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" release-artifact/*.zip --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" release-artifact/*.zip --verify-tag --generate-notes
+          fi

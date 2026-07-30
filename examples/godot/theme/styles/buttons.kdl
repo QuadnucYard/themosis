@@ -1,0 +1,47 @@
+style Button target=Button {
+    resource font "res://theme/assets/ui_font.tres"
+    resource focus "res://theme/assets/focus_ring.tres"
+    token normal surface.raised
+    token font_color text.primary
+    token font_size font-size.button
+
+    state hover {
+        token hover surface.panel
+        token font_hover_color brand.hover
+    }
+
+    state pressed {
+        token pressed surface.canvas
+    }
+
+    state disabled {
+        token disabled surface.raised
+        token font_disabled_color text.muted
+    }
+}
+
+style PrimaryButton target=Button extends=Button {
+    token normal brand.primary
+    token font_color text.on-accent
+
+    state hover {
+        token hover brand.hover
+        token font_hover_color text.on-accent
+    }
+
+    state pressed {
+        token pressed brand.pressed
+    }
+}
+
+style DangerButton target=Button extends=PrimaryButton {
+    token normal danger.base
+
+    state hover {
+        token hover danger.hover
+    }
+
+    state pressed {
+        token pressed danger.pressed
+    }
+}

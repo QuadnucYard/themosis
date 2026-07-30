@@ -1,0 +1,8 @@
+// A style name matching its target sets the native Panel defaults.
+style Panel target=Panel {
+    token panel surface.canvas
+}
+
+style PanelContainer target=PanelContainer {
+    token panel surface.panel
+}

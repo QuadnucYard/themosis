@@ -1,0 +1,2 @@
+# Godot writes an empty line after the final [params] section.
+*.import whitespace=-blank-at-eof

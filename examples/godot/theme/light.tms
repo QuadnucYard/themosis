@@ -1,0 +1,11 @@
+// Each concrete theme has one importable root and shares its KDL modules.
+theme Application {
+    tokens "tokens/common.tokens.json"
+    tokens "tokens/light.tokens.json"
+    import "styles/surfaces.kdl"
+    import "styles/typography.kdl"
+    import "styles/buttons.kdl"
+    import "styles/layout.kdl"
+    import "styles/inputs.kdl"
+    import "styles/feedback.kdl"
+}

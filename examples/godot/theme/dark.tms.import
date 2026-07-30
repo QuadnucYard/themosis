@@ -1,0 +1,15 @@
+[remap]
+
+importer="themosis.theme"
+importer_version=1
+type="Theme"
+uid="uid://ttlnrsdt703x"
+path="res://.godot/imported/dark.tms-464f3ee49e9d72cc154394f29fd1136e.tres"
+
+[deps]
+
+source_file="res://theme/dark.tms"
+dest_files=["res://.godot/imported/dark.tms-464f3ee49e9d72cc154394f29fd1136e.tres"]
+
+[params]
+

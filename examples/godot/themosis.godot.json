@@ -1,0 +1,24 @@
+{
+  "active_profile": "light",
+  "profiles": [
+    {
+      "auto_refresh": false,
+      "build_on_start": false,
+      "enabled": true,
+      "name": "light",
+      "output": "res://.themosis/materialized/light.tres",
+      "preview": "none",
+      "source": "res://theme/light.tms"
+    },
+    {
+      "auto_refresh": false,
+      "build_on_start": false,
+      "enabled": true,
+      "name": "dark",
+      "output": "res://.themosis/materialized/dark.tres",
+      "preview": "none",
+      "source": "res://theme/dark.tms"
+    }
+  ],
+  "version": 1
+}

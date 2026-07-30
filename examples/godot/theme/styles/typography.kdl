@@ -1,0 +1,25 @@
+style Label target=Label {
+    resource font "res://theme/assets/ui_font.tres"
+    token font_color text.muted
+    token font_size font-size.body
+}
+
+style AppTitle target=Label extends=Label {
+    token font_color text.primary
+    token font_size font-size.app-title
+}
+
+style SectionTitle target=Label extends=Label {
+    token font_color text.primary
+    token font_size font-size.section-title
+}
+
+style StatusLabel target=Label extends=Label {
+    token font_color brand.hover
+    token font_size font-size.status
+}
+
+style PlaceholderLabel target=Label extends=Label {
+    token font_color text.muted
+    token font_size font-size.status
+}

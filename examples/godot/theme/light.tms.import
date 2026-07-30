@@ -1,0 +1,15 @@
+[remap]
+
+importer="themosis.theme"
+importer_version=1
+type="Theme"
+uid="uid://c1vbxnqvs1y5w"
+path="res://.godot/imported/light.tms-2929e84ff2abd1a658c80e1d6d3acb3b.tres"
+
+[deps]
+
+source_file="res://theme/light.tms"
+dest_files=["res://.godot/imported/light.tms-2929e84ff2abd1a658c80e1d6d3acb3b.tres"]
+
+[params]
+

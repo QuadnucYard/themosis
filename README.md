@@ -1,80 +1,167 @@
 # Themosis
 
-Themosis is a backend-agnostic design-system compiler. It reads design tokens from a strict subset of the [Design Tokens Community Group](https://www.designtokens.org/) JSON format, combines them with component styles written in KDL, and produces canonical theme data for targeted backends.
-
-The project includes a reusable Rust compilation pipeline, a validation and generation CLI, and a Godot backend with an editor plugin and runnable dashboard example. Godot is one targeted backend rather than part of the compiler's core contract.
+Themosis is a backend-agnostic design-system compiler. It resolves strict
+DTCG-style JSON tokens and KDL 2 component styles into canonical theme data,
+then maps that data through a selected backend. Godot 4.5+ is one supported
+target; engine concerns stay outside the format and compiler crates.
 
 ## Requirements
 
 - Rust 1.95 or newer
-- Godot 4.5 or newer to run the Godot integration and example
-- [`just`](https://github.com/casey/just) for the convenience commands (optional)
+- Godot 4.5 or newer for the Godot integration
+- [`just`](https://github.com/casey/just) for convenience commands (optional)
+- `zip` and `unzip` for addon packaging
 
-## Quick start
+## Godot quick start
 
-Check the workspace and validate the example theme:
-
-```sh
-cargo check --workspace --all-targets
-cargo run -p themosis-cli -- check examples/godot/theme/dashboard.kdl
-```
-
-`themosis check` validates source loading, parsing, token resolution, and style
-semantics.
-
-The CLI enables its `godot` Cargo feature by default. It provides the Godot
-build/check target and its runtime options. Building with `--no-default-features`
-keeps the backend-agnostic command surface while excluding the Godot target and
-its dependencies.
-
-Build the GDExtension and open the example project:
+Build the GDExtension and open the example:
 
 ```sh
 cargo build -p themosis-godot-plugin
 godot --editor --path examples/godot
 ```
 
-The example's `.gdextension` configuration loads the debug library from the workspace's `target` directory. Rebuild `themosis-godot-plugin` after changing plugin Rust code.
+The example has two importable roots:
 
-## Theme sources
+```text
+theme/light.tms ─┐
+                 ├─ shared KDL component modules
+theme/dark.tms ──┘  + common and palette-specific JSON tokens
+```
 
-A root KDL file declares its token documents, imports, and styles:
+The editor addon imports each `.tms` directly as a native Godot `Theme`. Run
+the example and use its Light and Dark buttons to switch between
+`res://theme/light.tms` and `res://theme/dark.tms`; no startup compilation or
+generated `.tres` path is needed.
+
+The development `.gdextension` loads the debug library from the workspace
+`target` directory. Rebuild `themosis-godot-plugin` after changing Rust code.
+
+## Use in another Godot project
+
+Extract `themosis-godot-<version>.zip` into the project root and enable
+**Themosis** under **Project Settings → Plugins**. The plugin entry must be at
+`res://addons/themosis/plugin.cfg`.
+
+Create one `.tms` root for each concrete theme. Paths containing `/` remain
+quoted; ordinary KDL 2 values use bare strings:
 
 ```kdl
-theme Example {
-    tokens "example.tokens.json"
-    import "buttons.kdl"
-
-    style PrimaryButton target=Button {
-        token normal color.primary
-        token font_color color.on-primary
-
-        state hover {
-            token hover color.primary-hover
-        }
-    }
+// res://theme/light.tms
+theme Application {
+    tokens "tokens/common.tokens.json"
+    tokens "tokens/light.tokens.json"
+    import "styles/buttons.kdl"
 }
 ```
 
-Token documents use typed DTCG-style values. The supported token types are `boolean`, `number`, `string`, `dimension`, and sRGB `color`; aliases use the `{group.token}` form. See [the token format](crates/themosis-tokens/FORMAT.md) and [the KDL format](crates/themosis-kdl/FORMAT.md) for the complete contracts.
+Shared imports are fragments and do not repeat the theme wrapper:
+
+```kdl
+// res://theme/styles/buttons.kdl
+style Button target=Button {
+    token normal surface.raised
+    number font_size 16
+}
+
+style PrimaryButton target=Button extends=Button {
+    token normal brand.primary
+}
+```
+
+`style Button target=Button` supplies defaults for every `Button`. A different
+style name creates a Godot type variation, selected with
+`theme_type_variation = &"PrimaryButton"`.
+
+Reference imported roots exactly like ordinary resources:
+
+```gdscript
+const THEMES := {
+    &"light": preload("res://theme/light.tms"),
+    &"dark": preload("res://theme/dark.tms"),
+}
+
+func use_theme(name: StringName) -> void:
+    theme = THEMES[name]
+```
+
+Godot owns importer output under `.godot/imported`. The addon calls
+`ThemosisThemeGenerator` in the GDExtension directly—it never invokes the Rust
+CLI. Its dock provides **Reimport**, **Reimport all**, native previews, and
+clickable structured diagnostics. Persisted dependency fingerprints rebuild
+every affected root after shared KDL or JSON changes, including across editor
+restarts.
+
+When a visible stable output is useful, choose **Materialize…** and a confined
+`res://….tres` path such as `res://theme/generated/light.tres`. **All…** writes
+one file per root into a selected directory. Profile configuration in
+`res://themosis.godot.json` is retained for deterministic headless
+materialization:
+
+```sh
+godot --headless --editor --path . --import
+godot --headless --path . \
+  --script res://addons/themosis/build.gd -- --all
+```
+
+Both editor materialization and the headless builder call the extension. Output
+and source paths reject empty, `.`, `..`, and backslash segments.
+
+Runtime `generate()` remains available for mod or user-authored themes, but
+normal application themes should use imported `.tms` resources so compilation
+does not occur at startup.
+
+## Standalone CLI
+
+The CLI is independent of the addon and remains useful for backend-neutral
+checks or workflows that intentionally do not load the GDExtension:
+
+```sh
+cargo run -p themosis-cli -- check examples/godot/theme/light.tms
+cargo run -p themosis-cli -- build --target godot \
+  --project examples/godot \
+  --output res://.themosis/light.tres \
+  examples/godot/theme/light.tms
+```
+
+`check` validates loading, KDL/JSON parsing, token resolution, and style
+semantics. `--target godot` additionally validates against a running Godot
+engine. The standalone Godot builder uses `--godot FILE`, then
+`THEMOSIS_GODOT_BINARY`, then `godot`/`godot4`; it supports an exact
+`--require-godot-version` and a configurable `--godot-timeout`.
+
+## Source contracts
+
+Token documents support `boolean`, `number`, `string`, `dimension`, and sRGB
+`color` values; aliases use `{group.token}`. See the
+[token contract](crates/themosis-tokens/FORMAT.md),
+[KDL contract](crates/themosis-kdl/FORMAT.md), and
+[Godot mappings](crates/themosis-godot/MAPPINGS.md).
 
 ## Workspace
 
-| Path                           | Purpose                                              |
-| ------------------------------ | ---------------------------------------------------- |
-| `crates/themosis-core`         | Format-independent domain types                      |
-| `crates/themosis-tokens`       | DTCG-style JSON token parser                         |
-| `crates/themosis-kdl`          | KDL component-style parser                           |
-| `crates/themosis-compiler`     | Token resolution and semantic compilation            |
-| `crates/themosis`              | Source loading and end-to-end compilation facade     |
-| `crates/themosis-cli`          | Source validation and targeted artifact builds       |
+| Path | Purpose |
+| --- | --- |
+| `crates/themosis-core` | Format-independent domain types |
+| `crates/themosis-tokens` | Strict DTCG-style JSON parser |
+| `crates/themosis-kdl` | KDL 2 style parser |
+| `crates/themosis-compiler` | Pure token and style compilation |
+| `crates/themosis` | Safe source loading and end-to-end facade |
+| `crates/themosis-cli` | Validation and standalone artifact builds |
+| `crates/themosis-godot` | Portable Godot plans and native builder |
+| `crates/themosis-godot-plugin` | GDExtension and live Godot objects |
+| `examples/godot` | Multi-theme switching demo and addon sources |
 
 ## Development
 
-The common commands are available through `just`:
-
 ```sh
-just check           # check all workspace targets
-just test            # run all workspace tests
-just ci              # run the local CI-equivalent checks
+just check
+just test
+just ci
+just package-plugin
 ```
+
+`just package-plugin` creates a host development archive under `dist/`. Tagged
+releases assemble Linux x86_64, Windows x86_64, and macOS x86_64/arm64 native
+libraries into one archive. See the [example guide](examples/godot/README.md)
+for the demo and packaging workflow.

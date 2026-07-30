@@ -1,0 +1,256 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://theme_switcher.gd" id="1_script"]
+[ext_resource type="Theme" path="res://theme/dark.tms" id="2_theme"]
+
+[node name="Application" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme = ExtResource("2_theme")
+script = ExtResource("1_script")
+
+[node name="Canvas" type="Panel" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Margins" type="MarginContainer" parent="Canvas"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_type_variation = &"PageMargins"
+
+[node name="Content" type="VBoxContainer" parent="Canvas/Margins"]
+layout_mode = 2
+theme_type_variation = &"ContentStack"
+
+[node name="Header" type="HBoxContainer" parent="Canvas/Margins/Content"]
+layout_mode = 2
+
+[node name="Brand" type="VBoxContainer" parent="Canvas/Margins/Content/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="Title" type="Label" parent="Canvas/Margins/Content/Header/Brand"]
+layout_mode = 2
+theme_type_variation = &"AppTitle"
+text = "Themosis themes"
+
+[node name="ThemeStatus" type="Label" parent="Canvas/Margins/Content/Header/Brand"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"StatusLabel"
+text = "Loading imported theme…"
+
+[node name="ThemeSwitch" type="HBoxContainer" parent="Canvas/Margins/Content/Header"]
+layout_mode = 2
+
+[node name="LightButton" type="Button" parent="Canvas/Margins/Content/Header/ThemeSwitch"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(120, 46)
+layout_mode = 2
+text = "Light"
+
+[node name="DarkButton" type="Button" parent="Canvas/Margins/Content/Header/ThemeSwitch"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(120, 46)
+layout_mode = 2
+theme_type_variation = &"PrimaryButton"
+text = "Dark"
+
+[node name="Description" type="Label" parent="Canvas/Margins/Content"]
+layout_mode = 2
+text = "One shared component graph exercises native colors, styleboxes, constants, font sizes, fonts, and icons."
+autowrap_mode = 2
+
+[node name="GalleryScroll" type="ScrollContainer" parent="Canvas/Margins/Content"]
+layout_mode = 2
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="Gallery" type="GridContainer" parent="Canvas/Margins/Content/GalleryScroll"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+columns = 2
+
+[node name="ButtonsCard" type="PanelContainer" parent="Canvas/Margins/Content/GalleryScroll/Gallery"]
+custom_minimum_size = Vector2(0, 215)
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="Margins" type="MarginContainer" parent="Canvas/Margins/Content/GalleryScroll/Gallery/ButtonsCard"]
+layout_mode = 2
+theme_type_variation = &"CardMargins"
+
+[node name="Stack" type="VBoxContainer" parent="Canvas/Margins/Content/GalleryScroll/Gallery/ButtonsCard/Margins"]
+layout_mode = 2
+
+[node name="Heading" type="Label" parent="Canvas/Margins/Content/GalleryScroll/Gallery/ButtonsCard/Margins/Stack"]
+layout_mode = 2
+theme_type_variation = &"SectionTitle"
+text = "Buttons & states"
+
+[node name="Coverage" type="Label" parent="Canvas/Margins/Content/GalleryScroll/Gallery/ButtonsCard/Margins/Stack"]
+layout_mode = 2
+theme_type_variation = &"PlaceholderLabel"
+text = "Color items · color-backed styleboxes · resource focus"
+autowrap_mode = 2
+
+[node name="Actions" type="GridContainer" parent="Canvas/Margins/Content/GalleryScroll/Gallery/ButtonsCard/Margins/Stack"]
+layout_mode = 2
+columns = 2
+
+[node name="ActionButton" type="Button" parent="Canvas/Margins/Content/GalleryScroll/Gallery/ButtonsCard/Margins/Stack/Actions"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 46)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"PrimaryButton"
+text = "Primary action"
+
+[node name="SecondaryAction" type="Button" parent="Canvas/Margins/Content/GalleryScroll/Gallery/ButtonsCard/Margins/Stack/Actions"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 46)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Secondary"
+
+[node name="DangerAction" type="Button" parent="Canvas/Margins/Content/GalleryScroll/Gallery/ButtonsCard/Margins/Stack/Actions"]
+custom_minimum_size = Vector2(0, 46)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"DangerButton"
+text = "Danger"
+
+[node name="DisabledAction" type="Button" parent="Canvas/Margins/Content/GalleryScroll/Gallery/ButtonsCard/Margins/Stack/Actions"]
+custom_minimum_size = Vector2(0, 46)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"PrimaryButton"
+disabled = true
+text = "Disabled"
+
+[node name="InputCard" type="PanelContainer" parent="Canvas/Margins/Content/GalleryScroll/Gallery"]
+custom_minimum_size = Vector2(0, 215)
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="Margins" type="MarginContainer" parent="Canvas/Margins/Content/GalleryScroll/Gallery/InputCard"]
+layout_mode = 2
+theme_type_variation = &"CardMargins"
+
+[node name="Stack" type="VBoxContainer" parent="Canvas/Margins/Content/GalleryScroll/Gallery/InputCard/Margins"]
+layout_mode = 2
+
+[node name="Heading" type="Label" parent="Canvas/Margins/Content/GalleryScroll/Gallery/InputCard/Margins/Stack"]
+layout_mode = 2
+theme_type_variation = &"SectionTitle"
+text = "Text input"
+
+[node name="Coverage" type="Label" parent="Canvas/Margins/Content/GalleryScroll/Gallery/InputCard/Margins/Stack"]
+layout_mode = 2
+theme_type_variation = &"PlaceholderLabel"
+text = "Font and focus resources · caret and selection colors"
+autowrap_mode = 2
+
+[node name="NameInput" type="LineEdit" parent="Canvas/Margins/Content/GalleryScroll/Gallery/InputCard/Margins/Stack"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+placeholder_text = "Name your design system"
+
+[node name="ReadOnlyInput" type="LineEdit" parent="Canvas/Margins/Content/GalleryScroll/Gallery/InputCard/Margins/Stack"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+editable = false
+text = "Imported from res://theme/dark.tms"
+
+[node name="SelectionCard" type="PanelContainer" parent="Canvas/Margins/Content/GalleryScroll/Gallery"]
+custom_minimum_size = Vector2(0, 215)
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="Margins" type="MarginContainer" parent="Canvas/Margins/Content/GalleryScroll/Gallery/SelectionCard"]
+layout_mode = 2
+theme_type_variation = &"CardMargins"
+
+[node name="Stack" type="VBoxContainer" parent="Canvas/Margins/Content/GalleryScroll/Gallery/SelectionCard/Margins"]
+layout_mode = 2
+
+[node name="Heading" type="Label" parent="Canvas/Margins/Content/GalleryScroll/Gallery/SelectionCard/Margins/Stack"]
+layout_mode = 2
+theme_type_variation = &"SectionTitle"
+text = "Selection"
+
+[node name="Coverage" type="Label" parent="Canvas/Margins/Content/GalleryScroll/Gallery/SelectionCard/Margins/Stack"]
+layout_mode = 2
+theme_type_variation = &"PlaceholderLabel"
+text = "Texture2D icon resource · inherited button states"
+autowrap_mode = 2
+
+[node name="DensityOption" type="OptionButton" parent="Canvas/Margins/Content/GalleryScroll/Gallery/SelectionCard/Margins/Stack"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+item_count = 3
+selected = 1
+popup/item_0/text = "Compact density"
+popup/item_0/id = 0
+popup/item_1/text = "Comfortable density"
+popup/item_1/id = 1
+popup/item_2/text = "Spacious density"
+popup/item_2/id = 2
+
+[node name="IncludeStates" type="CheckBox" parent="Canvas/Margins/Content/GalleryScroll/Gallery/SelectionCard/Margins/Stack"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+button_pressed = true
+text = "Include hover, pressed, and disabled states"
+
+[node name="FeedbackCard" type="PanelContainer" parent="Canvas/Margins/Content/GalleryScroll/Gallery"]
+custom_minimum_size = Vector2(0, 215)
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="Margins" type="MarginContainer" parent="Canvas/Margins/Content/GalleryScroll/Gallery/FeedbackCard"]
+layout_mode = 2
+theme_type_variation = &"CardMargins"
+
+[node name="Stack" type="VBoxContainer" parent="Canvas/Margins/Content/GalleryScroll/Gallery/FeedbackCard/Margins"]
+layout_mode = 2
+
+[node name="Heading" type="Label" parent="Canvas/Margins/Content/GalleryScroll/Gallery/FeedbackCard/Margins/Stack"]
+layout_mode = 2
+theme_type_variation = &"SectionTitle"
+text = "Feedback & coverage"
+
+[node name="BuildProgress" type="ProgressBar" parent="Canvas/Margins/Content/GalleryScroll/Gallery/FeedbackCard/Margins/Stack"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+value = 68.0
+
+[node name="UnsupportedHeading" type="Label" parent="Canvas/Margins/Content/GalleryScroll/Gallery/FeedbackCard/Margins/Stack"]
+layout_mode = 2
+theme_type_variation = &"SectionTitle"
+text = "Not mapped yet"
+
+[node name="UnsupportedValues" type="Label" parent="Canvas/Margins/Content/GalleryScroll/Gallery/FeedbackCard/Margins/Stack"]
+layout_mode = 2
+theme_type_variation = &"PlaceholderLabel"
+text = "○ Boolean and string theme values\n○ Fractional px and rem dimensions"
+autowrap_mode = 2

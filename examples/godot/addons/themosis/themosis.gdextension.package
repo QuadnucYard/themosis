@@ -1,0 +1,18 @@
+[configuration]
+entry_symbol = "gdext_rust_init"
+compatibility_minimum = 4.5
+reloadable = true
+
+[libraries]
+linux.debug.x86_64 = "res://addons/themosis/bin/linux/x86_64/libthemosis_godot.so"
+linux.release.x86_64 = "res://addons/themosis/bin/linux/x86_64/libthemosis_godot.so"
+linux.debug.arm64 = "res://addons/themosis/bin/linux/arm64/libthemosis_godot.so"
+linux.release.arm64 = "res://addons/themosis/bin/linux/arm64/libthemosis_godot.so"
+macos.debug.x86_64 = "res://addons/themosis/bin/macos/x86_64/libthemosis_godot.dylib"
+macos.release.x86_64 = "res://addons/themosis/bin/macos/x86_64/libthemosis_godot.dylib"
+macos.debug.arm64 = "res://addons/themosis/bin/macos/arm64/libthemosis_godot.dylib"
+macos.release.arm64 = "res://addons/themosis/bin/macos/arm64/libthemosis_godot.dylib"
+windows.debug.x86_64 = "res://addons/themosis/bin/windows/x86_64/themosis_godot.dll"
+windows.release.x86_64 = "res://addons/themosis/bin/windows/x86_64/themosis_godot.dll"
+windows.debug.arm64 = "res://addons/themosis/bin/windows/arm64/themosis_godot.dll"
+windows.release.arm64 = "res://addons/themosis/bin/windows/arm64/themosis_godot.dll"

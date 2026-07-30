@@ -1,0 +1,98 @@
+{
+  "surface": {
+    "$type": "color",
+    "canvas": {
+      "$value": {
+        "colorSpace": "srgb",
+        "components": [0.94, 0.96, 1.0],
+        "alpha": 1.0
+      }
+    },
+    "panel": {
+      "$value": {
+        "colorSpace": "srgb",
+        "components": [1.0, 1.0, 1.0],
+        "alpha": 1.0
+      }
+    },
+    "raised": {
+      "$value": {
+        "colorSpace": "srgb",
+        "components": [0.84, 0.88, 0.96],
+        "alpha": 1.0
+      }
+    }
+  },
+  "brand": {
+    "$type": "color",
+    "primary": {
+      "$value": {
+        "colorSpace": "srgb",
+        "components": [0.12, 0.36, 0.88],
+        "alpha": 1.0
+      }
+    },
+    "hover": {
+      "$value": {
+        "colorSpace": "srgb",
+        "components": [0.18, 0.44, 0.96],
+        "alpha": 1.0
+      }
+    },
+    "pressed": {
+      "$value": {
+        "colorSpace": "srgb",
+        "components": [0.08, 0.26, 0.7],
+        "alpha": 1.0
+      }
+    }
+  },
+  "danger": {
+    "$type": "color",
+    "base": {
+      "$value": {
+        "colorSpace": "srgb",
+        "components": [0.78, 0.14, 0.22],
+        "alpha": 1.0
+      }
+    },
+    "hover": {
+      "$value": {
+        "colorSpace": "srgb",
+        "components": [0.9, 0.2, 0.28],
+        "alpha": 1.0
+      }
+    },
+    "pressed": {
+      "$value": {
+        "colorSpace": "srgb",
+        "components": [0.62, 0.08, 0.16],
+        "alpha": 1.0
+      }
+    }
+  },
+  "text": {
+    "$type": "color",
+    "primary": {
+      "$value": {
+        "colorSpace": "srgb",
+        "components": [0.08, 0.1, 0.16],
+        "alpha": 1.0
+      }
+    },
+    "muted": {
+      "$value": {
+        "colorSpace": "srgb",
+        "components": [0.34, 0.39, 0.5],
+        "alpha": 1.0
+      }
+    },
+    "on-accent": {
+      "$value": {
+        "colorSpace": "srgb",
+        "components": [1.0, 1.0, 1.0],
+        "alpha": 1.0
+      }
+    }
+  }
+}

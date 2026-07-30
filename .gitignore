@@ -7,6 +7,7 @@ target/
 
 # Repository metadata
 !.gitignore
+!.gitattributes
 !.github/
 
 # Documentation
@@ -26,6 +27,13 @@ target/
 # Source code
 !crates/
 !crates/**
+!/examples/
+!/scripts/
+
+# Godot
+**/.godot/
+**/.themosis/
+**/*.gdextension.uid
 
 # Godot
 **/.godot/

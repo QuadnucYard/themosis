@@ -1,0 +1,20 @@
+[application]
+config/name="Themosis Theme Switcher"
+run/main_scene="res://theme_switcher.tscn"
+
+[display]
+window/size/viewport_width=1040
+window/size/viewport_height=680
+window/size/window_width_override=1040
+window/size/window_height_override=680
+window/stretch/mode="canvas_items"
+
+[editor_plugins]
+enabled=PackedStringArray("res://addons/themosis/plugin.cfg")
+
+[rendering]
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+
+[themosis]
+profile_config="res://themosis.godot.json"

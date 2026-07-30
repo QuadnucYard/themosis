@@ -14,6 +14,8 @@ Themosis is a backend-agnostic Rust design-system compiler for DTCG-style JSON t
 - `crates/themosis-cli`: source checking and targeted artifact generation.
 - `crates/themosis-godot`: reusable Godot `.tres` generation and validation. Supported mappings are in `MAPPINGS.md`.
 - `crates/themosis-godot-plugin`: live Godot conversion and the GDExtension API.
+- `examples/godot`: executable demo and editor plugin sources.
+- `scripts/package-plugin.sh`: platform-specific addon packaging.
 
 ## Commands
 
@@ -38,8 +40,13 @@ Useful focused commands include:
 
 ```sh
 cargo test -p <crate-name>
-cargo run -p themosis-cli -- check examples/godot/theme/dashboard.kdl
+cargo run -p themosis-cli -- check examples/godot/theme/light.tms
+cargo run -p themosis-cli -- build --target godot --project examples/godot --output res://.themosis/light.tres examples/godot/theme/light.tms
+cargo build -p themosis-godot-plugin
+just package-plugin
 ```
+
+The Godot tests require a usable Godot environment. Packaging additionally requires `zip` and produces an archive under `dist/`.
 
 ## Implementation guidelines
 
