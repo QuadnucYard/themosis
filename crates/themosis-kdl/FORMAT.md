@@ -47,3 +47,13 @@ Properties are explicit nodes with two arguments: property name and value.
 Duplicate style, state, and property names, inheritance, token existence, and
 property type compatibility are semantic compiler responsibilities. Repeated
 source imports are idempotent and are loaded once by the facade.
+
+## Diagnostics
+
+KDL parsing reports every independent failure in deterministic source traversal
+order. Each rendered diagnostic includes its stable code.
+
+| Code | Meaning |
+| --- | --- |
+| `TMS1001` | Invalid KDL 2 syntax |
+| `TMS1002` | A parsed KDL declaration violates this format contract or a core invariant |

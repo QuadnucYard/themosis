@@ -1,4 +1,4 @@
-use themosis_core::Span;
+use themosis_core::{Diagnostic, Errors, Span};
 use thiserror::Error;
 
 /// KDL syntax or structure-conversion failure.
@@ -7,21 +7,22 @@ pub enum ParseError {
     /// KDL syntax error reported by the KDL parser.
     #[error(transparent)]
     Syntax(#[from] SyntaxError),
-    /// Parsed KDL that violates the format contract or core invariants.
-    #[error("{0}")]
-    Contract(#[source] StructureErrors),
+    /// One parsed KDL declaration that violates the format contract or core invariants.
+    #[error(transparent)]
+    Structure(#[from] StructureError),
 }
 
-impl ParseError {
-    /// Returns the stable diagnostic code for this parse failure.
-    #[must_use]
-    pub const fn code(&self) -> &'static str {
+impl Diagnostic for ParseError {
+    fn code(&self) -> &str {
         match self {
             Self::Syntax(_) => "TMS1001",
-            Self::Contract(_) => "TMS1002",
+            Self::Structure(_) => "TMS1002",
         }
     }
 }
+
+/// All errors found while parsing one KDL document.
+pub type ParseErrors = Errors<ParseError>;
 
 /// One filename-aware KDL 2 syntax failure.
 #[derive(Debug, Error)]
@@ -50,6 +51,12 @@ impl SyntaxError {
     #[must_use]
     pub fn parser_error(&self) -> &kdl::KdlError {
         &self.source
+    }
+}
+
+impl Diagnostic for SyntaxError {
+    fn code(&self) -> &str {
+        "TMS1001"
     }
 }
 
@@ -98,16 +105,9 @@ impl StructureError {
     }
 }
 
-/// All structure errors collected from one KDL document.
-#[derive(Clone, Debug, Eq, PartialEq, Error)]
-#[error("{}", format_structure_errors(.0))]
-pub struct StructureErrors(pub(crate) Vec<StructureError>);
-
-impl StructureErrors {
-    /// Returns errors in source traversal order.
-    #[must_use]
-    pub fn errors(&self) -> &[StructureError] {
-        &self.0
+impl Diagnostic for StructureError {
+    fn code(&self) -> &str {
+        "TMS1002"
     }
 }
 
@@ -115,14 +115,6 @@ fn format_span(span: &Option<Span>) -> String {
     span.as_ref().map_or_else(String::new, |span| {
         format!(" at bytes {}..{}", span.start(), span.end())
     })
-}
-
-fn format_structure_errors(errors: &[StructureError]) -> String {
-    errors
-        .iter()
-        .map(ToString::to_string)
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 fn format_syntax_error(file_name: &str, error: &kdl::KdlError) -> String {

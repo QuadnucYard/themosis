@@ -5,10 +5,12 @@
 
 #![forbid(unsafe_code)]
 
+mod diagnostic;
 mod source;
 mod style;
 mod token;
 
+pub use diagnostic::{Diagnostic, Errors};
 pub use source::{InvalidSpan, SourceId, Span};
 pub use style::{
     CompiledState, CompiledStyle, CompiledTheme, CompiledValue, CompiledValueKind, InvalidName,

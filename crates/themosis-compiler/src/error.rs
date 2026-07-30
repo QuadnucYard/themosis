@@ -1,4 +1,4 @@
-use themosis_core::{CompiledValueKind, Name, TokenKind, TokenPath};
+use themosis_core::{CompiledValueKind, Diagnostic, Name, TokenKind, TokenPath};
 use thiserror::Error;
 
 /// One semantic compilation error.
@@ -126,10 +126,8 @@ pub enum CompileError {
     },
 }
 
-impl CompileError {
-    /// Returns the stable diagnostic code for this semantic failure.
-    #[must_use]
-    pub const fn code(&self) -> &'static str {
+impl Diagnostic for CompileError {
+    fn code(&self) -> &str {
         match self {
             Self::NoStyleDocuments => "TMS2001",
             Self::ThemeNameMismatch { .. } => "TMS2002",

@@ -1,3 +1,4 @@
+use themosis_core::{Diagnostic, Errors};
 use thiserror::Error;
 
 /// One syntax or structural token-document error.
@@ -29,16 +30,6 @@ impl ParseError {
         }
     }
 
-    /// Returns the stable diagnostic code for this parse failure.
-    #[must_use]
-    pub const fn code(&self) -> &'static str {
-        if self.line.is_some() {
-            "TMS1101"
-        } else {
-            "TMS1102"
-        }
-    }
-
     /// Returns the JSON path associated with the error.
     #[must_use]
     pub fn path(&self) -> &str {
@@ -64,26 +55,18 @@ impl ParseError {
     }
 }
 
-/// All errors found while decoding one token document.
-#[derive(Clone, Debug, Eq, PartialEq, Error)]
-#[error("{}", format_parse_errors(.0))]
-pub struct ParseErrors(Vec<ParseError>);
-
-impl ParseErrors {
-    pub(crate) fn one(error: ParseError) -> Self {
-        Self(vec![error])
-    }
-
-    pub(crate) fn many(errors: Vec<ParseError>) -> Self {
-        Self(errors)
-    }
-
-    /// Returns errors in deterministic document traversal order.
-    #[must_use]
-    pub fn errors(&self) -> &[ParseError] {
-        &self.0
+impl Diagnostic for ParseError {
+    fn code(&self) -> &str {
+        if self.line.is_some() {
+            "TMS1101"
+        } else {
+            "TMS1102"
+        }
     }
 }
+
+/// All errors found while decoding one token document.
+pub type ParseErrors = Errors<ParseError>;
 
 fn format_parse_error(
     path: &str,
@@ -96,12 +79,4 @@ fn format_parse_error(
     } else {
         format!("{path}: {message}")
     }
-}
-
-fn format_parse_errors(errors: &[ParseError]) -> String {
-    errors
-        .iter()
-        .map(|error| format!("error[{}]: {error}", error.code()))
-        .collect::<Vec<_>>()
-        .join("\n")
 }

@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, fmt};
 
-use themosis_core::{Name, SourceId, Span, TokenPath};
+use themosis_core::{Diagnostic, Name, SourceId, Span, TokenPath};
 use thiserror::Error;
 
 use crate::CompileError;

@@ -384,25 +384,25 @@ impl<'a> StyleResolver<'a> {
     ) {
         for (name, value) in incoming {
             let expected = destination.get(&name).or_else(|| fallback.get(&name));
-            if let Some(expected) = expected {
-                if expected.kind() != value.kind() {
-                    self.errors.push(
-                        CompileError::PropertyTypeMismatch {
-                            style: style.name().clone(),
-                            state: state.cloned(),
-                            property: name,
-                            expected: expected.kind(),
-                            actual: value.kind(),
-                        },
-                        vec![DiagnosticLabel::primary(
-                            source,
-                            style.span(),
-                            "incompatible override",
-                        )],
-                        None,
-                    );
-                    continue;
-                }
+            if let Some(expected) = expected
+                && expected.kind() != value.kind()
+            {
+                self.errors.push(
+                    CompileError::PropertyTypeMismatch {
+                        style: style.name().clone(),
+                        state: state.cloned(),
+                        property: name,
+                        expected: expected.kind(),
+                        actual: value.kind(),
+                    },
+                    vec![DiagnosticLabel::primary(
+                        source,
+                        style.span(),
+                        "incompatible override",
+                    )],
+                    None,
+                );
+                continue;
             }
             destination.insert(name, value);
         }
@@ -437,8 +437,8 @@ mod tests {
     use std::str::FromStr;
 
     use themosis_core::{
-        CompiledValue, Name, Number, PropertyAssignment, ResolvedTokens, SourceId, StyleDefinition,
-        StyleDocument, StyleState, StyleValue, TokenPath, TokenValue,
+        CompiledValue, Diagnostic, Name, Number, PropertyAssignment, ResolvedTokens, SourceId,
+        StyleDefinition, StyleDocument, StyleState, StyleValue, TokenPath, TokenValue,
     };
 
     use super::{CompileError, compile_styles};

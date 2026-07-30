@@ -25,3 +25,13 @@
 An exact string of the form `{group.token}` is decoded as an unresolved alias for any token type. Alias existence, cycles, and type compatibility are compiler responsibilities.
 
 No other DTCG types, color spaces, component value forms, or composite extensions are accepted in version one.
+
+## Diagnostics
+
+Token parsing reports every independent failure in deterministic document
+traversal order. Each rendered diagnostic includes its stable code.
+
+| Code | Meaning |
+| --- | --- |
+| `TMS1101` | Invalid JSON syntax |
+| `TMS1102` | A parsed JSON value violates the token document contract |

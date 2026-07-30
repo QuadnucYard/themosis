@@ -31,7 +31,7 @@ pub fn parse(source: SourceId, input: &str) -> Result<TokenDocument, ParseErrors
     if parser.errors.is_empty() {
         Ok(TokenDocument::new(source, parser.tokens))
     } else {
-        Err(ParseErrors::many(parser.errors))
+        Err(ParseErrors::new(parser.errors))
     }
 }
 

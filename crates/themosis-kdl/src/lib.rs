@@ -6,5 +6,5 @@ mod decode;
 mod error;
 mod parser;
 
-pub use error::{ParseError, StructureError, StructureErrors, SyntaxError};
+pub use error::{ParseError, ParseErrors, StructureError, SyntaxError};
 pub use parser::parse;

@@ -72,13 +72,13 @@ impl TokenDefinition {
         kind: TokenKind,
         expression: TokenExpression,
     ) -> Result<Self, InvalidTokenDefinition> {
-        if let TokenExpression::Literal(value) = &expression {
-            if value.kind() != kind {
-                return Err(InvalidTokenDefinition {
-                    declared: kind,
-                    actual: value.kind(),
-                });
-            }
+        if let TokenExpression::Literal(value) = &expression
+            && value.kind() != kind
+        {
+            return Err(InvalidTokenDefinition {
+                declared: kind,
+                actual: value.kind(),
+            });
         }
 
         Ok(Self {

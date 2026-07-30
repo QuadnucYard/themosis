@@ -241,7 +241,7 @@ pub enum LoadError {
         path: PathBuf,
         /// Parser failure.
         #[source]
-        source: themosis_kdl::ParseError,
+        source: themosis_kdl::ParseErrors,
     },
     /// A token JSON source is malformed.
     #[error("failed to parse '{path}': {source}")]

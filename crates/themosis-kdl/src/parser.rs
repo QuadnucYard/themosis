@@ -8,31 +8,30 @@ use themosis_core::{
 
 use crate::{
     decode::{DecodeValue, Decoded, Decoder},
-    error::{ParseError, StructureError, StructureErrors, SyntaxError},
+    error::{ParseError, ParseErrors, StructureError, SyntaxError},
 };
 
 /// Parses one component-style KDL 2 source.
-pub fn parse(file_name: &str, source: SourceId, input: &str) -> Result<StyleDocument, ParseError> {
-    let parsed =
-        KdlDocument::parse_v2(input).map_err(|error| SyntaxError::new(file_name, error))?;
+pub fn parse(file_name: &str, source: SourceId, input: &str) -> Result<StyleDocument, ParseErrors> {
+    let parsed = KdlDocument::parse_v2(input).map_err(|error| {
+        ParseErrors::one(ParseError::Syntax(SyntaxError::new(file_name, error)))
+    })?;
 
     if parsed.nodes().len() != 1 {
-        return Err(ParseError::Contract(StructureErrors(vec![
+        return Err(ParseErrors::one(ParseError::Structure(
             StructureError::new("document", "expected exactly one theme node"),
-        ])));
+        )));
     }
 
     let root = &parsed.nodes()[0];
     if root.name().value() != "theme" {
         let decoder = Decoder::new(source);
         let span = decoder.node_name_span(root);
-        return Err(ParseError::Contract(StructureErrors(vec![
-            StructureError::at(
-                "document",
-                format!("expected theme node, found '{}'", root.name().value()),
-                span,
-            ),
-        ])));
+        return Err(ParseErrors::one(ParseError::Structure(StructureError::at(
+            "document",
+            format!("expected theme node, found '{}'", root.name().value()),
+            span,
+        ))));
     }
 
     let mut converter = Converter::new(source);
@@ -41,13 +40,15 @@ pub fn parse(file_name: &str, source: SourceId, input: &str) -> Result<StyleDocu
 
     if errors.is_empty() {
         document.ok_or_else(|| {
-            ParseError::Contract(StructureErrors(vec![StructureError::new(
+            ParseErrors::one(ParseError::Structure(StructureError::new(
                 "theme",
                 "theme could not be converted",
-            )]))
+            )))
         })
     } else {
-        Err(ParseError::Contract(StructureErrors(errors)))
+        Err(ParseErrors::new(
+            errors.into_iter().map(ParseError::Structure).collect(),
+        ))
     }
 }
 
@@ -356,11 +357,22 @@ impl Converter {
 
 #[cfg(test)]
 mod tests {
-    use themosis_core::{SourceId, StyleValue};
+    use themosis_core::{Diagnostic, SourceId, StyleValue};
 
-    use super::{ParseError, parse};
+    use super::{ParseError, ParseErrors, StructureError, parse};
 
     const VALID: &str = include_str!("../tests/fixtures/valid/theme.kdl");
+
+    fn structure_errors(errors: &ParseErrors) -> Vec<&StructureError> {
+        errors
+            .errors()
+            .iter()
+            .map(|error| match error {
+                ParseError::Structure(error) => error,
+                ParseError::Syntax(_) => panic!("expected structure error"),
+            })
+            .collect()
+    }
 
     #[test]
     fn decodes_theme_sources_styles_and_states() {
@@ -412,40 +424,36 @@ mod tests {
         let input = "theme dark { style Primary target=Button { boolean disabled false } }\n";
         let error = parse("v1.kdl", SourceId::new(0), input).expect_err("v1 is not accepted");
 
-        assert_eq!(error.code(), "TMS1001");
-        assert!(matches!(error, ParseError::Syntax(_)));
-        assert!(error.to_string().starts_with("v1.kdl:"));
+        assert_eq!(error.errors()[0].code(), "TMS1001");
+        assert!(matches!(error.errors()[0], ParseError::Syntax(_)));
+        assert!(error.to_string().starts_with("error[TMS1001]: v1.kdl:"));
     }
 
     #[test]
     fn collects_schema_errors() {
         let input = include_str!("../tests/fixtures/invalid/schema.kdl");
         let error = parse("schema.kdl", SourceId::new(0), input).expect_err("fixture is invalid");
-        assert_eq!(error.code(), "TMS1002");
-        let ParseError::Contract(errors) = error else {
-            panic!("expected contract errors");
-        };
-        let messages = errors
-            .errors()
-            .iter()
-            .map(super::StructureError::message)
+        assert_eq!(error.errors()[0].code(), "TMS1002");
+        let messages = structure_errors(&error)
+            .into_iter()
+            .map(StructureError::message)
             .collect::<Vec<_>>();
 
         assert!(messages.contains(&"property 'target' is required"));
         assert!(messages.contains(&"unexpected node 'unknown'"));
+        assert_eq!(
+            error.to_string().matches("error[TMS1002]:").count(),
+            error.len()
+        );
     }
 
     #[test]
     fn collects_core_structure_errors() {
         let input = include_str!("../tests/fixtures/invalid/values.kdl");
         let error = parse("values.kdl", SourceId::new(0), input).expect_err("fixture is invalid");
-        let ParseError::Contract(errors) = error else {
-            panic!("expected contract errors");
-        };
-        let messages = errors
-            .errors()
-            .iter()
-            .map(super::StructureError::message)
+        let messages = structure_errors(&error)
+            .into_iter()
+            .map(StructureError::message)
             .collect::<Vec<_>>();
 
         assert!(messages.contains(&"token path segment 1 is empty"));
@@ -460,13 +468,9 @@ theme dark {
 }
 "#;
         let error = parse("schema.kdl", SourceId::new(0), input).expect_err("input is invalid");
-        let ParseError::Contract(errors) = error else {
-            panic!("expected contract errors");
-        };
-        let messages = errors
-            .errors()
-            .iter()
-            .map(super::StructureError::message)
+        let messages = structure_errors(&error)
+            .into_iter()
+            .map(StructureError::message)
             .collect::<Vec<_>>();
 
         assert!(messages.contains(&"duplicate property 'target'"));
@@ -478,10 +482,9 @@ theme dark {
     fn schema_type_errors_use_entry_spans() {
         let input = "theme dark { style Primary target=#true }\n";
         let error = parse("span.kdl", SourceId::new(6), input).expect_err("target is not a string");
-        let ParseError::Contract(errors) = error else {
-            panic!("expected contract errors");
-        };
-        let span = errors.errors()[0].span().expect("type error is spanned");
+        let span = structure_errors(&error)[0]
+            .span()
+            .expect("type error is spanned");
 
         assert_eq!(span.source(), SourceId::new(6));
         assert_eq!(&input[span.range()], "target=#true");
@@ -491,11 +494,7 @@ theme dark {
     fn rejects_non_finite_numbers() {
         let input = "theme dark { style Primary target=Button { number opacity #inf } }\n";
         let error = parse("number.kdl", SourceId::new(0), input).expect_err("infinity is invalid");
-        let ParseError::Contract(errors) = error else {
-            panic!("expected contract errors");
-        };
-
-        assert!(errors.errors()[0].message().contains("finite"));
+        assert!(structure_errors(&error)[0].message().contains("finite"));
     }
 
     #[test]
