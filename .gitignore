@@ -26,3 +26,8 @@ target/
 # Source code
 !crates/
 !crates/**
+
+# Godot
+**/.godot/
+**/.themosis/
+**/*.gdextension.uid

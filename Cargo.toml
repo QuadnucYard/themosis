@@ -6,6 +6,7 @@ members = [
     "crates/themosis-core",
     "crates/themosis-kdl",
     "crates/themosis-godot",
+    "crates/themosis-godot-plugin",
     "crates/themosis-tokens",
 ]
 resolver = "2"

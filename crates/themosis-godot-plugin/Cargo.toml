@@ -1,0 +1,29 @@
+[package]
+name = "themosis-godot-plugin"
+description = "Godot GDExtension and native resource integration for Themosis"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+themosis.workspace = true
+themosis-compiler.workspace = true
+themosis-core.workspace = true
+themosis-godot.workspace = true
+themosis-kdl.workspace = true
+themosis-tokens.workspace = true
+
+godot.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

@@ -12,6 +12,8 @@ Themosis is a backend-agnostic Rust design-system compiler for DTCG-style JSON t
 - `crates/themosis-compiler`: pure token resolution, style inheritance, and diagnostics.
 - `crates/themosis`: source providers, import discovery, path safety, and the end-to-end facade.
 - `crates/themosis-cli`: source checking and targeted artifact generation.
+- `crates/themosis-godot`: reusable Godot `.tres` generation and validation. Supported mappings are in `MAPPINGS.md`.
+- `crates/themosis-godot-plugin`: live Godot conversion and the GDExtension API.
 
 ## Commands
 
@@ -46,6 +48,7 @@ cargo run -p themosis-cli -- check examples/godot/theme/dashboard.kdl
 - Prefer deterministic collections and diagnostics; the existing pipeline uses `BTreeMap` and `BTreeSet` intentionally.
 - Return structured, actionable errors instead of silently ignoring invalid input or unsupported Godot mappings.
 - Follow the workspace lint configuration in the root `Cargo.toml`. Public Rust APIs should have documentation. Should ensure comments for unobvious implementation details.
+- Keep dependencies centralized in `[workspace.dependencies]` when they are shared, and pin Godot-facing behavior to the supported Godot/API version.
 - Update the relevant format or mapping document whenever a public source contract or Godot conversion changes.
 
 ## Testing expectations
@@ -53,6 +56,7 @@ cargo run -p themosis-cli -- check examples/godot/theme/dashboard.kdl
 - Add unit tests near pure parsing or compilation logic.
 - Add fixture-driven tests for accepted and rejected source syntax.
 - Add facade tests for imports, source discovery, path handling, and end-to-end compilation.
+- Add backend or headless Godot tests for native mapping changes.
 - Run the narrowest relevant test while iterating, then run `just ci` before handing off a completed change.
 - If Rust formatting or lint-sensitive code changed, also run `cargo fmt --all --check` and the relevant Clippy command.
 
@@ -64,3 +68,4 @@ Before finishing:
 2. Add or update tests that exercise both success and failure behavior.
 3. Update `FORMAT.md`, `MAPPINGS.md`, the example, or `README.md` if user-visible behavior changed.
 4. Run the relevant focused tests and `just ci`.
+5. Report any Godot or platform-specific checks that could not be run.

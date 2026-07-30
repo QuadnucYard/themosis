@@ -1,0 +1,10 @@
+[configuration]
+entry_symbol = "gdext_rust_init"
+compatibility_minimum = 4.5
+reloadable = true
+
+[libraries]
+linux.debug.x86_64 = "res://../../../../target/debug/deps/libthemosis_godot_plugin.so"
+macos.debug = "res://../../../../target/debug/deps/libthemosis_godot_plugin.dylib"
+macos.debug.arm64 = "res://../../../../target/debug/deps/libthemosis_godot_plugin.dylib"
+windows.debug.x86_64 = "res://../../../../target/debug/deps/themosis_godot_plugin.dll"
