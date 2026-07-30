@@ -5,6 +5,7 @@ members = [
     "crates/themosis-compiler",
     "crates/themosis-core",
     "crates/themosis-kdl",
+    "crates/themosis-godot",
     "crates/themosis-tokens",
 ]
 resolver = "2"
@@ -21,9 +22,12 @@ themosis = { path = "crates/themosis", version = "0.1.0" }
 themosis-compiler = { path = "crates/themosis-compiler", version = "0.1.0" }
 themosis-core = { path = "crates/themosis-core", version = "0.1.0" }
 themosis-kdl = { path = "crates/themosis-kdl", version = "0.1.0" }
+themosis-godot = { path = "crates/themosis-godot", version = "0.1.0" }
 themosis-tokens = { path = "crates/themosis-tokens", version = "0.1.0" }
 
+godot = { version = "=0.5.4", features = ["api-4-5"] }
 kdl = { version = "=6.7.1", default-features = false, features = ["span"] }
+serde = "1.0"
 serde_json = "1.0"
 thiserror = "2.0"
 

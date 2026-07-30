@@ -45,7 +45,7 @@ declared name must match the root.
 - `theme NAME` is the only root-source node.
 - `tokens PATH` declares a DTCG-compatible JSON token source.
 - `import PATH` declares another component-style KDL source.
-- `style NAME target=CONTROL [extends=STYLE]` declares a component style. A custom name maps to a Godot theme type variation of `CONTROL`.
+- `style NAME target=TARGET [extends=STYLE]` declares a component style. The selected backend interprets `TARGET` and maps the custom style name into its native component-style mechanism.
 - `state NAME` contains explicit property overrides. There is no selector matching or cascade.
 
 An imported fragment accepts `tokens`, `import`, and `style` as top-level nodes.
