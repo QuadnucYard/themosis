@@ -12,6 +12,7 @@ target/
 # Documentation
 !README.md
 !LICENSE
+!AGENTS.md
 !docs/
 !docs/**
 
