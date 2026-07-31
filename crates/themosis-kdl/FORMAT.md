@@ -1,36 +1,56 @@
 # Component-style KDL contract
 
-A source is parsed as KDL 2.0 and contains exactly one `theme` root. KDL 1.0
-fallback is not supported. JSON token files and imported KDL files are declared
-explicitly; loading and path normalization are handled by the facade rather
-than this parser.
+A root source is parsed as KDL 2.0 and contains exactly one `theme` node. KDL
+1.0 fallback is not supported. JSON token files and imported KDL files are
+declared explicitly; loading and path normalization are handled by the facade
+rather than this parser.
 
 ```kdl
-theme "dark" {
+theme dark {
     tokens "tokens/dark.tokens.json"
     import "controls.kdl"
 
-    style "PrimaryButton" target="Button" extends="BaseButton" {
-        token "background" "color.primary"
-        number "font-size" 16
-        boolean "disabled" #false
-        string "label" "Primary"
-        resource "font" "res://fonts/ui.tres"
+    style PrimaryButton target=Button extends=BaseButton {
+        token background color.primary
+        number font-size 16
+        boolean disabled #false
+        string label Primary
+        resource font "res://fonts/ui.tres"
 
-        state "hover" {
-            token "background" "color.accent"
+        state hover {
+            token background color.accent
         }
     }
 }
 ```
 
+Use KDL 2 bare strings when possible. Quotes remain required for values such as
+paths containing `/`, whitespace, or other characters excluded from bare
+identifiers.
+
+Imported files may be lightweight fragments without another `theme` wrapper:
+
+```kdl
+style BaseButton target=Button {
+    number font_size 16
+}
+```
+
+The loader assigns a fragment the importing root's theme name. Legacy imported
+documents containing one complete `theme` node remain supported and their
+declared name must match the root.
+
 ## Nodes
 
-- `theme NAME` is the only root node.
+- `theme NAME` is the only root-source node.
 - `tokens PATH` declares a DTCG-compatible JSON token source.
 - `import PATH` declares another component-style KDL source.
 - `style NAME target=CONTROL [extends=STYLE]` declares a component style. A custom name maps to a Godot theme type variation of `CONTROL`.
 - `state NAME` contains explicit property overrides. There is no selector matching or cascade.
+
+An imported fragment accepts `tokens`, `import`, and `style` as top-level nodes.
+Fragments can therefore be nested and reused by any root without repeating a
+theme name.
 
 ## Property values
 

@@ -4,12 +4,12 @@ use std::{
 };
 
 use themosis_compiler::{CompileErrors, compile_styles, resolve_tokens};
-use themosis_core::{CompiledTheme, SourceId, StyleDocument, TokenDocument};
+use themosis_core::{CompiledTheme, Name, SourceId, StyleDocument, TokenDocument};
 use thiserror::Error;
 
 use crate::{InvalidSourcePath, SourceReadError, paths::normalize, provider::SourceProvider};
 
-/// Compiles a root KDL document and its complete declared dependency tree.
+/// Compiles a root style document and its complete declared dependency tree.
 pub fn compile_theme(
     provider: &impl SourceProvider,
     root: impl AsRef<Path>,
@@ -40,7 +40,7 @@ pub fn compile_theme_with_report(
         }
     };
     let mut loader = Loader::new(provider);
-    if let Err(error) = loader.load_style(root.clone()) {
+    if let Err(error) = loader.load_style(root.clone(), None) {
         return CompilationReport::new(loader.dependencies, Err(error));
     }
     let dependencies = loader.dependencies;
@@ -134,7 +134,11 @@ impl<'a, P: SourceProvider> Loader<'a, P> {
         Ok(source)
     }
 
-    fn load_style(&mut self, path: PathBuf) -> Result<(), LoadError> {
+    fn load_style(
+        &mut self,
+        path: PathBuf,
+        inherited_theme: Option<&Name>,
+    ) -> Result<(), LoadError> {
         self.dependencies.insert(path.clone());
         if self.styles.contains_key(&path) {
             return Ok(());
@@ -152,13 +156,16 @@ impl<'a, P: SourceProvider> Loader<'a, P> {
         self.visiting.push(path.clone());
         let source = self.read(&path)?;
         let source_id = self.source_id(&path)?;
-        let document =
-            themosis_kdl::parse(&path.to_string_lossy(), source_id, &source).map_err(|source| {
-                LoadError::Kdl {
-                    path: path.clone(),
-                    source,
-                }
-            })?;
+        let parsed = inherited_theme.map_or_else(
+            || themosis_kdl::parse(&path.to_string_lossy(), source_id, &source),
+            |theme_name| {
+                themosis_kdl::parse_import(&path.to_string_lossy(), source_id, theme_name, &source)
+            },
+        );
+        let document = parsed.map_err(|source| LoadError::Kdl {
+            path: path.clone(),
+            source,
+        })?;
 
         for token in document.token_sources() {
             let token_path = resolve_reference(&path, token)?;
@@ -166,7 +173,7 @@ impl<'a, P: SourceProvider> Loader<'a, P> {
         }
         for import in document.imports() {
             let import_path = resolve_reference(&path, import)?;
-            self.load_style(import_path)?;
+            self.load_style(import_path, Some(document.name()))?;
         }
 
         let popped = self.visiting.pop();

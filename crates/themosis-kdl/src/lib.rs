@@ -7,4 +7,4 @@ mod error;
 mod parser;
 
 pub use error::{ParseError, ParseErrors, StructureError, SyntaxError};
-pub use parser::parse;
+pub use parser::{parse, parse_import};

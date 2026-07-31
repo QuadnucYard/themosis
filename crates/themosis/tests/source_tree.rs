@@ -79,17 +79,37 @@ fn reports_all_dependencies_after_successful_loading() {
 }
 
 #[test]
+fn imported_fragments_inherit_the_root_theme() {
+    let mut provider = MemorySourceProvider::new();
+    provider
+        .insert(
+            "light.tms",
+            r#"theme Application { import "controls.kdl" }"#,
+        )
+        .expect("root path is valid");
+    provider
+        .insert(
+            "controls.kdl",
+            r#"style PrimaryButton target=Button { number font_size 16}"#,
+        )
+        .expect("module path is valid");
+
+    let compiled = compile_theme(&provider, "light.tms").expect("fragment compiles");
+
+    assert_eq!(compiled.name().as_str(), "Application");
+    assert!(compiled.styles().contains_key(&name("PrimaryButton")));
+}
+
+#[test]
 fn retains_discovered_dependencies_after_a_read_failure() {
     let mut provider = MemorySourceProvider::new();
     provider
         .insert(
             "theme.kdl",
-            concat!(
-                "theme \"Application\" {\n",
-                "    tokens \"tokens.json\"\n",
-                "    import \"missing.kdl\"\n",
-                "}\n",
-            ),
+            r#"theme Application {
+                import "missing.kdl"
+                tokens "tokens.json"
+            }"#,
         )
         .expect("path is valid");
     provider
@@ -113,16 +133,10 @@ fn retains_discovered_dependencies_after_a_read_failure() {
 fn rejects_import_cycles_with_a_closed_path() {
     let mut provider = MemorySourceProvider::new();
     provider
-        .insert(
-            "theme.kdl",
-            "theme \"Application\" {\n    import \"a.kdl\"\n}\n",
-        )
+        .insert("theme.kdl", r#"theme Application { import "a.kdl" }"#)
         .expect("path is valid");
     provider
-        .insert(
-            "a.kdl",
-            "theme \"Application\" {\n    import \"theme.kdl\"\n}\n",
-        )
+        .insert("a.kdl", r#"theme Application { import "theme.kdl" }"#)
         .expect("path is valid");
 
     let error = compile_theme(&provider, "theme.kdl").expect_err("imports contain a cycle");
@@ -144,7 +158,9 @@ fn rejects_dependencies_that_escape_the_theme_root() {
     provider
         .insert(
             "styles/theme.kdl",
-            "theme \"Application\" {\n    tokens \"../../outside.tokens.json\"\n}\n",
+            r#"theme Application {
+                tokens "../../outside.tokens.json"
+            }"#,
         )
         .expect("root path is valid");
 
@@ -165,14 +181,12 @@ fn renders_semantic_diagnostics_with_source_names_and_suggestions() {
     provider
         .insert(
             "theme.kdl",
-            concat!(
-                "theme \"Application\" {\n",
-                "    tokens \"tokens.json\"\n",
-                "    style \"PrimaryButton\" target=\"Button\" {\n",
-                "        token \"background\" \"color.primray\"\n",
-                "    }\n",
-                "}\n",
-            ),
+            r#"theme Application {
+                tokens "tokens.json"
+                style PrimaryButton target=Button {
+                    token background color.primray
+                }
+            }"#,
         )
         .expect("path is valid");
     provider
@@ -196,11 +210,11 @@ fn root_document_establishes_the_theme_name() {
     provider
         .insert(
             "z-root.kdl",
-            "theme \"Application\" {\n    import \"a-import.kdl\"\n}\n",
+            r#"theme Application { import "a-import.kdl" }"#,
         )
         .expect("path is valid");
     provider
-        .insert("a-import.kdl", "theme \"WrongName\" {}\n")
+        .insert("a-import.kdl", r#"theme WrongName {}"#)
         .expect("path is valid");
 
     let error = compile_theme(&provider, "z-root.kdl").expect_err("theme names conflict");

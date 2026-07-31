@@ -13,9 +13,7 @@ use crate::{
 
 /// Parses one component-style KDL 2 source.
 pub fn parse(file_name: &str, source: SourceId, input: &str) -> Result<StyleDocument, ParseErrors> {
-    let parsed = KdlDocument::parse_v2(input).map_err(|error| {
-        ParseErrors::one(ParseError::Syntax(SyntaxError::new(file_name, error)))
-    })?;
+    let parsed = parse_document(file_name, input)?;
 
     if parsed.nodes().len() != 1 {
         return Err(ParseErrors::one(ParseError::Structure(
@@ -34,8 +32,42 @@ pub fn parse(file_name: &str, source: SourceId, input: &str) -> Result<StyleDocu
         ))));
     }
 
+    convert(source, |converter| converter.convert_theme(root))
+}
+
+/// Parses an imported KDL module using the root theme's name.
+///
+/// Imports may either contain ordinary top-level `tokens`, `import`, and
+/// `style` nodes or retain the legacy single `theme` wrapper. Wrapped imports
+/// continue to participate in semantic theme-name validation.
+pub fn parse_import(
+    file_name: &str,
+    source: SourceId,
+    theme_name: &Name,
+    input: &str,
+) -> Result<StyleDocument, ParseErrors> {
+    let parsed = parse_document(file_name, input)?;
+    if let [root] = parsed.nodes()
+        && root.name().value() == "theme"
+    {
+        return convert(source, |converter| converter.convert_theme(root));
+    }
+    convert(source, |converter| {
+        converter.convert_fragment(theme_name.clone(), parsed.nodes())
+    })
+}
+
+fn parse_document(file_name: &str, input: &str) -> Result<KdlDocument, ParseErrors> {
+    KdlDocument::parse_v2(input)
+        .map_err(|error| ParseErrors::one(ParseError::Syntax(SyntaxError::new(file_name, error))))
+}
+
+fn convert(
+    source: SourceId,
+    operation: impl FnOnce(&mut Converter) -> Option<StyleDocument>,
+) -> Result<StyleDocument, ParseErrors> {
     let mut converter = Converter::new(source);
-    let document = converter.convert_theme(root);
+    let document = operation(&mut converter);
     let errors = converter.into_errors();
 
     if errors.is_empty() {
@@ -76,11 +108,27 @@ impl Converter {
             (name, children)
         };
         let name = raw_name.and_then(|value| self.name("theme", value));
+        self.convert_declarations(name?, children)
+    }
+
+    fn convert_fragment(
+        &mut self,
+        theme_name: Name,
+        declarations: &[KdlNode],
+    ) -> Option<StyleDocument> {
+        self.convert_declarations(theme_name, declarations)
+    }
+
+    fn convert_declarations(
+        &mut self,
+        theme_name: Name,
+        declarations: &[KdlNode],
+    ) -> Option<StyleDocument> {
         let mut token_sources = Vec::new();
         let mut imports = Vec::new();
         let mut styles = Vec::new();
 
-        for child in children {
+        for child in declarations {
             match child.name().value() {
                 "tokens" => {
                     if let Some(path) = self.convert_source_path("tokens", child) {
@@ -103,7 +151,7 @@ impl Converter {
 
         Some(StyleDocument::new(
             self.decoder.source(),
-            name?,
+            theme_name,
             token_sources,
             imports,
             styles,
@@ -359,7 +407,7 @@ impl Converter {
 mod tests {
     use themosis_core::{Diagnostic, SourceId, StyleValue};
 
-    use super::{ParseError, ParseErrors, StructureError, parse};
+    use super::{ParseError, ParseErrors, StructureError, parse, parse_import};
 
     const VALID: &str = include_str!("../tests/fixtures/valid/theme.kdl");
 
@@ -417,6 +465,33 @@ mod tests {
             document.styles()[0].properties()[0].value(),
             StyleValue::Boolean(false)
         ));
+    }
+
+    #[test]
+    fn imported_fragments_inherit_the_root_theme_name() {
+        let input = r#"
+tokens "tokens/shared.tokens.json"
+style Primary target=Button {
+    number font_size 16
+}
+"#;
+        let theme_name = themosis_core::Name::new("Application").expect("name is valid");
+        let document = parse_import("controls.kdl", SourceId::new(2), &theme_name, input)
+            .expect("fragment is valid");
+
+        assert_eq!(document.name(), &theme_name);
+        assert_eq!(document.token_sources(), ["tokens/shared.tokens.json"]);
+        assert_eq!(document.styles()[0].name().as_str(), "Primary");
+    }
+
+    #[test]
+    fn imported_wrapped_documents_retain_their_own_theme_name() {
+        let input = "theme Different { style Primary target=Button }\n";
+        let inherited = themosis_core::Name::new("Application").expect("name is valid");
+        let document = parse_import("controls.kdl", SourceId::new(2), &inherited, input)
+            .expect("legacy wrapped import is valid");
+
+        assert_eq!(document.name().as_str(), "Different");
     }
 
     #[test]
