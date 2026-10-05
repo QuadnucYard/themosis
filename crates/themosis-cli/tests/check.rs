@@ -50,50 +50,42 @@ fn invalid_invocation_has_a_distinct_usage_exit_code() {
     assert!(stderr.contains("Usage: themosis"));
 }
 
-#[cfg(not(feature = "godot"))]
 #[test]
-fn godot_target_is_absent_without_the_feature() {
+fn exposes_engine_independent_and_project_aware_commands() {
     let output = command().arg("--help").output().expect("CLI starts");
-
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).expect("stdout is UTF-8");
     assert!(stdout.contains("check"));
-    assert!(stdout.contains("build"));
+    assert!(!stdout.contains("build"));
+    #[cfg(feature = "godot")]
+    assert!(stdout.contains("godot"));
+    #[cfg(not(feature = "godot"))]
+    assert!(!stdout.contains("godot"));
 
-    for command_name in ["build", "check"] {
+    let output = command()
+        .args(["check", "--help"])
+        .output()
+        .expect("CLI starts");
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout is UTF-8");
+    assert!(!stdout.contains("--target"));
+    assert!(!stdout.contains("--godot"));
+}
+
+#[cfg(feature = "godot")]
+#[test]
+fn godot_subcommands_expose_runtime_options() {
+    for action in ["check", "build"] {
         let output = command()
-            .args([command_name, "--help"])
+            .args(["godot", action, "--help"])
             .output()
             .expect("CLI starts");
         assert!(output.status.success());
         let stdout = String::from_utf8(output.stdout).expect("stdout is UTF-8");
-        assert!(!stdout.contains("--godot"));
-        assert!(!stdout.contains("--project"));
+        assert!(stdout.contains("--godot"));
+        assert!(stdout.contains("--project"));
+        assert!(stdout.contains("--require-version"));
+        assert!(stdout.contains("--timeout"));
+        assert!(!stdout.contains("--target"));
     }
-
-    let root =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../themosis/tests/fixtures/valid/theme.kdl");
-    let output = command()
-        .args([
-            "check",
-            "--target",
-            "godot",
-            root.to_str().expect("fixture path is UTF-8"),
-        ])
-        .output()
-        .expect("CLI starts");
-    assert_eq!(output.status.code(), Some(2));
-
-    let output = command()
-        .args([
-            "build",
-            "--target",
-            "godot",
-            "--output",
-            "theme.tres",
-            root.to_str().expect("fixture path is UTF-8"),
-        ])
-        .output()
-        .expect("CLI starts");
-    assert_eq!(output.status.code(), Some(2));
 }

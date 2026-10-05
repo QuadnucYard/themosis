@@ -13,21 +13,6 @@ fn command() -> Command {
 }
 
 #[test]
-fn feature_exposes_godot_through_generic_commands() {
-    for command_name in ["build", "check"] {
-        let output = command()
-            .args([command_name, "--help"])
-            .output()
-            .expect("CLI starts");
-        assert!(output.status.success());
-        let stdout = String::from_utf8(output.stdout).expect("stdout is UTF-8");
-        assert!(stdout.contains("--target <TARGET>"));
-        assert!(stdout.contains("godot"));
-        assert!(stdout.contains("--godot <FILE>"));
-    }
-}
-
-#[test]
 fn missing_godot_project_directory_is_rejected() {
     let project = TestProject::new();
     let missing_project = project.path().join("missing-project");
@@ -136,9 +121,8 @@ impl TestProject {
     fn command_for_project(&self, command_name: &str, godot: &str, project: &Path) -> Command {
         let mut command = command();
         command.args([
-            command_name,
-            "--target",
             "godot",
+            command_name,
             "--godot",
             godot,
             "--project",
@@ -254,9 +238,8 @@ fn check_can_apply_portable_godot_backend_validation() {
 
     let output = command()
         .args([
-            "check",
-            "--target",
             "godot",
+            "check",
             "--godot",
             &godot,
             root.to_str().expect("fixture path is UTF-8"),
@@ -423,7 +406,7 @@ fn exact_version_mismatch_preserves_existing_output() {
 
     let output = project
         .command("build", &godot)
-        .args(["--require-godot-version", "0.0.0", "--output"])
+        .args(["--require-version", "0.0.0", "--output"])
         .arg(project.output())
         .arg(project.root())
         .output()
@@ -505,7 +488,7 @@ fn godot_timeout_stops_a_stalled_runtime() {
             "check",
             executable.to_str().expect("executable path is UTF-8"),
         )
-        .args(["--godot-timeout", "1"])
+        .args(["--timeout", "1"])
         .arg(project.root())
         .output()
         .expect("CLI starts");

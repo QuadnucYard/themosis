@@ -78,8 +78,14 @@ explicit alternative when a stable, visible `.tres` output is required.
 Generate a native theme without loading the plugin:
 
 ```sh
-themosis build --target godot \
-  --godot godot \
+# Engine-independent source check.
+themosis check theme/application.kdl
+
+# Compile and map against the project's live engine.
+themosis godot check --project . theme/application.kdl
+
+# Materialize a native theme.
+themosis godot build \
   --project . \
   --output res://theme/generated/application.tres \
   theme/application.kdl
@@ -87,7 +93,7 @@ themosis build --target godot \
 
 The CLI accepts `--godot FILE`, then `THEMOSIS_GODOT_BINARY`, then searches for `godot` or `godot4`. The executing engine must be Godot 4.5 or newer; there is no upper-version selection table because its live `ClassDB`, default `Theme`, and `ResourceLoader` decide availability. CI exercises the minimum 4.5 runtime and a newer stable runtime.
 
-Use `--require-godot-version 4.5.0` to reject any runtime whose numeric `MAJOR.MINOR.PATCH` differs, or omit it to accept the 4.5 lower bound and later compatible versions. Successful commands report the engine's display version and commit hash. `--godot-timeout SECONDS` changes the default 120-second limit.
+Use `--require-version 4.5.0` to reject any runtime whose numeric `MAJOR.MINOR.PATCH` differs, or omit it to accept the 4.5 lower bound and later compatible versions. Successful commands report the engine's display version and commit hash. `--timeout SECONDS` changes the default 120-second limit.
 
 Output must resolve inside the canonical project directory. Parent symlinks that escape the project are rejected before Godot starts, and validation does not create output directories. Generation saves a temporary sibling and replaces the requested output only after compilation, live mapping, native construction, and `ResourceSaver` serialization succeed, so mapping and version failures preserve an existing file. Use the same exact Godot version for generation and project export when byte-for-byte reproducibility or exact cross-version compatibility matters.
 

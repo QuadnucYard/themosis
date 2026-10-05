@@ -22,10 +22,7 @@ cargo run -p themosis-cli -- check examples/godot/theme/dashboard.kdl
 `themosis check` validates source loading, parsing, token resolution, and style
 semantics.
 
-The CLI enables its `godot` Cargo feature by default. It provides the Godot
-build/check target and its runtime options. Building with `--no-default-features`
-keeps the backend-agnostic command surface while excluding the Godot target and
-its dependencies.
+The CLI enables its `godot` Cargo feature by default. It provides the `godot check` and `godot build` subcommands and their runtime options. Building with `--no-default-features` keeps the backend-agnostic command surface while excluding the Godot subcommands and their dependencies.
 
 Build the GDExtension and open the example project:
 

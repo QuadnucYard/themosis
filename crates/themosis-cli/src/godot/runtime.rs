@@ -1,4 +1,4 @@
-//! Runtime-backed Godot execution.
+//! Project-aware Godot runner execution.
 
 use std::{
     env, fs,
@@ -16,18 +16,18 @@ use themosis_godot::{GodotBuildPlan, NATIVE_THEME_BUILDER_GDSCRIPT, NATIVE_THEME
 
 use super::output::localize_output;
 
-/// Godot runtime selection shared by targeted commands.
+/// Godot runtime selection shared by the Godot subcommands.
 #[derive(Debug, Args)]
 pub(crate) struct RuntimeOptions {
-    /// Godot executable used for native target validation and generation.
+    /// Godot executable used for native validation and generation.
     #[arg(long, value_name = "FILE")]
     godot: Option<PathBuf>,
-    /// Godot project directory; inferred from the root source when omitted.
+    /// Godot project directory; inferred from the source or current directory.
     #[arg(long, value_name = "DIR")]
     project: Option<PathBuf>,
     /// Fail unless Godot's numeric version exactly matches MAJOR.MINOR.PATCH.
     #[arg(long, value_name = "MAJOR.MINOR.PATCH", value_parser = parse_required_version)]
-    require_godot_version: Option<String>,
+    require_version: Option<String>,
     /// Maximum time allowed for the headless Godot operation.
     #[arg(
         long,
@@ -35,24 +35,29 @@ pub(crate) struct RuntimeOptions {
         default_value_t = 120,
         value_parser = clap::value_parser!(u64).range(1..)
     )]
-    godot_timeout: u64,
+    timeout: u64,
 }
 
 impl RuntimeOptions {
-    pub(crate) fn check(&self, root: &Path, plan: &GodotBuildPlan) -> Result<String, String> {
+    /// Compiles and maps a theme root without writing an artifact.
+    pub(crate) fn check(&self, root: &Path) -> Result<String, String> {
+        let plan = self.plan(root)?;
         let project = self.project_root(root)?;
-        self.run(&project, plan, "check", None)
+        self.run(&project, &plan, "check", None)
     }
 
-    pub(crate) fn build(
-        &self,
-        root: &Path,
-        output: &Path,
-        plan: &GodotBuildPlan,
-    ) -> Result<String, String> {
+    /// Compiles a theme root and writes its native theme, returning the output path.
+    pub(crate) fn build(&self, root: &Path, output: &Path) -> Result<String, String> {
+        let plan = self.plan(root)?;
         let project = self.project_root(root)?;
         let output = localize_output(&project, output)?;
-        self.run(&project, plan, "build", Some(&output))
+        self.run(&project, &plan, "build", Some(&output))
+    }
+
+    /// Compiles a theme root into a portable Godot build plan.
+    fn plan(&self, root: &Path) -> Result<GodotBuildPlan, String> {
+        let theme = crate::source::compile_source(root)?;
+        themosis_godot::plan_theme(&theme).map_err(|error| error.to_string())
     }
 
     fn project_root(&self, root: &Path) -> Result<PathBuf, String> {
@@ -80,19 +85,14 @@ impl RuntimeOptions {
         operation: &str,
         output: Option<&str>,
     ) -> Result<String, String> {
-        let files = RunnerFiles::create(
-            plan,
-            operation,
-            output,
-            self.require_godot_version.as_deref(),
-        )?;
+        let files = RunnerFiles::create(plan, operation, output, self.require_version.as_deref())?;
         let mut last_missing = None;
         for executable in self.executables() {
             match run_godot(
                 &executable,
                 project,
                 &files,
-                Duration::from_secs(self.godot_timeout),
+                Duration::from_secs(self.timeout),
             ) {
                 Ok(process) => return parse_response(process, &files),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {

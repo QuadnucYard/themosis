@@ -1,10 +1,7 @@
-//! Godot-specific command-line commands and runtime support.
+//! Project-aware Godot commands backed by the native runner.
 
-mod build;
-mod check;
+mod command;
 mod output;
 mod runtime;
 
-pub(crate) use build::run as build_theme;
-pub(crate) use check::run as check_theme;
-pub(crate) use runtime::RuntimeOptions;
+pub(crate) use command::Godot;
