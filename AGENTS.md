@@ -58,7 +58,7 @@ cargo run -p themosis-cli -- check examples/godot/theme/dashboard.kdl
 - Add facade tests for imports, source discovery, path handling, and end-to-end compilation.
 - Add backend or headless Godot tests for native mapping changes.
 - Run the narrowest relevant test while iterating, then run `just ci` before handing off a completed change.
-- If Rust formatting or lint-sensitive code changed, also run `cargo fmt --all --check` and the relevant Clippy command.
+- If Rust formatting or lint-sensitive code changed, also run `just clippy`.
 
 ## Change checklist
 

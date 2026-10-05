@@ -8,11 +8,11 @@ default:
 
 # Format all workspace code.
 fmt:
-    cargo fmt --all --check
+    cargo fmt --all
 
 # Check every target in the workspace.
 check:
-    cargo check --workspace --all-targets
+    cargo clippy --workspace --all-targets
 
 # Run all workspace tests.
 test:
