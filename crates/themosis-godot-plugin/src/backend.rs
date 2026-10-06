@@ -1,7 +1,7 @@
 mod diagnostic;
 
 use godot::{
-    classes::{GDScript, Json, Object, Theme},
+    classes::{GDScript, Json, Theme},
     global::Error,
     prelude::*,
 };

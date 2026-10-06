@@ -379,7 +379,6 @@ fn json_path(path: &[String]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use themosis_core::{DimensionUnit, SourceId, TokenExpression, TokenKind, TokenValue};
 
     use super::*;
 

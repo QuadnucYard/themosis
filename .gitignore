@@ -21,6 +21,7 @@ target/
 !Cargo.lock
 !rust-toolchain.toml
 !rustfmt.toml
+!clippy.toml
 !justfile
 
 # Source code

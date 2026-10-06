@@ -15,6 +15,7 @@ use tempfile::{Builder as TempDirBuilder, TempDir};
 use themosis_godot::{GodotBuildPlan, NATIVE_THEME_BUILDER_GDSCRIPT, NATIVE_THEME_RUNNER_GDSCRIPT};
 
 use super::output::localize_output;
+use crate::source::compile_source;
 
 /// Godot runtime selection shared by the Godot subcommands.
 #[derive(Debug, Args)]
@@ -56,7 +57,7 @@ impl RuntimeOptions {
 
     /// Compiles a theme root into a portable Godot build plan.
     fn plan(&self, root: &Path) -> Result<GodotBuildPlan, String> {
-        let theme = crate::source::compile_source(root)?;
+        let theme = compile_source(root)?;
         themosis_godot::plan_theme(&theme).map_err(|error| error.to_string())
     }
 

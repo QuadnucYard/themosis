@@ -1,6 +1,10 @@
 use std::collections::BTreeMap;
 
-use godot::{builtin::Corner, classes::StyleBoxFlat, prelude::*};
+use godot::{
+    builtin::{Color as GodotColor, Corner},
+    classes::StyleBoxFlat,
+    prelude::*,
+};
 use themosis_core::{
     Color, CompiledState, CompiledStyle, CompiledTheme, CompiledValue, Dimension, DimensionUnit,
     Name, Number, ResolvedTokens, ResourceRef,
@@ -16,9 +20,9 @@ struct ThemosisBackendTests;
 impl ThemosisBackendTests {
     #[func]
     fn verify_native_mappings() -> bool {
-        fn to_godot_color(color: Color) -> godot::builtin::Color {
+        fn to_godot_color(color: Color) -> GodotColor {
             let [red, green, blue] = color.components();
-            godot::builtin::Color::from_rgba(
+            GodotColor::from_rgba(
                 red.get() as f32,
                 green.get() as f32,
                 blue.get() as f32,
