@@ -4,7 +4,10 @@
 use godot::{classes::Time, obj::Singleton};
 use themosis_godot::{
     profiles::{self, Profile, ProfileConfig},
-    reports::{BatchOutcome, Operation, OperationOutcome, OutcomeStatus},
+    reports::{
+        BatchOutcome, MaterializePlanError, Operation, OperationOutcome, OutcomeStatus, file_stem,
+        plan_materialize_all,
+    },
     runner::RunnerDiagnostic,
 };
 
@@ -126,6 +129,36 @@ pub(crate) fn build_profile(profile: &Profile, save_output: bool) -> OperationOu
             dependencies,
             elapsed,
         ),
+    }
+}
+
+/// Materializes one source to an explicit destination.
+pub(crate) fn materialize_source(source: &str, output: &str) -> OperationOutcome {
+    build_profile(
+        &profiles::new_profile(file_stem(source), source, output),
+        true,
+    )
+}
+
+/// Materializes every source into one directory after preflighting it.
+///
+/// Destinations keep the source file name, so two roots with the same basename
+/// would silently overwrite each other. The directory and every destination
+/// collision are checked before anything is written.
+pub(crate) fn materialize_all(sources: &[String], directory: &str) -> BatchOutcome {
+    match plan_materialize_all(sources, directory) {
+        Ok(planned) => BatchOutcome::from_results(
+            planned
+                .iter()
+                .map(|destination| materialize_source(&destination.source, &destination.output))
+                .collect(),
+        ),
+        Err(MaterializePlanError::Directory(error)) => {
+            BatchOutcome::rejected(format!("output directory {error}"))
+        }
+        Err(MaterializePlanError::Collisions(collisions)) => {
+            BatchOutcome::collided(sources.len(), collisions)
+        }
     }
 }
 

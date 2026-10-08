@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 
 mod backend;
+pub mod editor;
 mod errors;
 pub mod profiles;
 pub mod reports;

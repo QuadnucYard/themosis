@@ -52,3 +52,45 @@ fn gallery_scene_runs_without_script_errors() {
         "the demo control failed to switch themes:\n{messages}"
     );
 }
+
+/// The editor loads the auto-registered plugin and its dock.
+#[test]
+fn gallery_editor_loads_the_theme_dock() {
+    let Some(executable) = support::godot() else {
+        return;
+    };
+    let Some(gallery) = GalleryProject::new() else {
+        return;
+    };
+
+    let imported = gallery.import(&executable);
+    let messages = support::messages(&imported);
+    assert!(
+        imported.status.success() && !messages.contains("SCRIPT ERROR"),
+        "Godot could not import the gallery:\n{messages}"
+    );
+
+    let editor = gallery.run_editor(&executable);
+    let messages = support::messages(&editor);
+    assert!(
+        editor.status.success()
+            && !messages.contains("SCRIPT ERROR")
+            && !messages.contains("Failed to load script"),
+        "Godot editor could not load the Themosis dock:\n{messages}"
+    );
+
+    gallery.write(
+        "gallery_classes.gd",
+        include_str!("godot/gallery_classes.gd"),
+    );
+    let classes = gallery.run_script(
+        &executable,
+        "res://gallery_classes.gd",
+        "gallery-classes.log",
+    );
+    let messages = support::messages(&classes);
+    assert!(
+        classes.status.success() && messages.contains("Gallery classes: passed"),
+        "the pinned library did not register the editor classes:\n{messages}"
+    );
+}

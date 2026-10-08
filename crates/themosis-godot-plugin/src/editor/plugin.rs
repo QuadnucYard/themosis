@@ -3,7 +3,8 @@
 //!
 //! This plugin auto-registers while the editor loads the extension and cannot
 //! be enabled or disabled through the plugins dialog. It talks to the importer
-//! through Rust types; only the engine's own signals carry values between them.
+//! and the dock through Rust types; only the engine's own signals carry values
+//! between them.
 
 // `#[class(init)]` expands to code that trips these lints on the `base` field.
 #![allow(clippy::absolute_paths, clippy::redundant_field_names)]
@@ -13,7 +14,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use godot::{
     classes::{
         Button, EditorFileSystem, EditorPlugin, IEditorPlugin, Timer,
-        editor_plugin::CustomControlContainer,
+        editor_plugin::{CustomControlContainer, DockSlot},
     },
     obj::{NewAlloc, NewGd, WithBaseField},
     prelude::*,
@@ -25,22 +26,28 @@ use themosis_godot::{
 };
 
 use crate::{
-    editor::importer::{ImportReport, ThemosisThemeImporter},
-    native::import_cache::{
-        DEPENDENCIES_META, DEPENDENCY_FINGERPRINT_META, content_hash, fingerprint_snapshot,
-        load_imported_theme, meta_string, meta_string_array,
+    editor::{
+        dock::ThemosisThemeDock,
+        importer::{ImportReport, ThemosisThemeImporter},
+    },
+    native::{
+        builder,
+        import_cache::{
+            DEPENDENCIES_META, DEPENDENCY_FINGERPRINT_META, content_hash, fingerprint_snapshot,
+            load_imported_theme, meta_string, meta_string_array,
+        },
     },
     project::{config, sources},
 };
 
-/// Godot-facing editor plugin coordinating the importer and the reimport
-/// toolbar.
+/// Godot-facing editor plugin coordinating importer, dock, and toolbar.
 #[derive(GodotClass)]
 #[class(tool, init, base=EditorPlugin)]
 pub struct ThemosisEditorPlugin {
     base: Base<EditorPlugin>,
 
     importer: Option<Gd<ThemosisThemeImporter>>,
+    dock: Option<Gd<ThemosisThemeDock>>,
     button: Option<Gd<Button>>,
     filesystem: Option<Gd<EditorFileSystem>>,
     filesystem_handle: Option<ConnectHandle>,
@@ -67,6 +74,25 @@ impl IEditorPlugin for ThemosisEditorPlugin {
             .import_completed()
             .connect_other(&self.to_gd(), Self::on_import_completed);
         self.base_mut().add_import_plugin(&importer);
+
+        let dock = ThemosisThemeDock::new_alloc();
+        dock.signals()
+            .reimport_requested()
+            .connect_other(&self.to_gd(), Self::reimport_one);
+        dock.signals()
+            .reimport_all_requested()
+            .connect_other(&self.to_gd(), Self::reimport_all);
+        dock.signals()
+            .materialize_requested()
+            .connect_other(&self.to_gd(), Self::materialize);
+        dock.signals()
+            .materialize_all_requested()
+            .connect_other(&self.to_gd(), Self::materialize_all);
+        dock.signals()
+            .diagnostic_clicked()
+            .connect_other(&self.to_gd(), Self::open_diagnostic);
+        self.base_mut()
+            .add_control_to_dock(DockSlot::RIGHT_UL, &dock);
 
         let mut button = Button::new_alloc();
         button.set_text("Reimport Themosis");
@@ -99,6 +125,7 @@ impl IEditorPlugin for ThemosisEditorPlugin {
         });
 
         self.importer = Some(importer);
+        self.dock = Some(dock);
         self.button = Some(button);
         self.filesystem = filesystem;
         self.filesystem_handle = filesystem_handle;
@@ -111,6 +138,10 @@ impl IEditorPlugin for ThemosisEditorPlugin {
             && handle.is_connected()
         {
             handle.disconnect();
+        }
+        if let Some(mut dock) = self.dock.take() {
+            self.base_mut().remove_control_from_docks(&dock);
+            dock.queue_free();
         }
         if let Some(mut button) = self.button.take() {
             self.base_mut()
@@ -181,6 +212,9 @@ impl ThemosisEditorPlugin {
             }
             self.snapshots.insert(source.clone(), current);
             self.pending_reimports.insert(source.clone());
+            if let Some(dock) = self.dock.as_mut() {
+                dock.bind_mut().mark_stale(source);
+            }
         }
         if !self.pending_reimports.is_empty()
             && let Some(refresh_timer) = self.refresh_timer.as_mut()
@@ -204,6 +238,9 @@ impl ThemosisEditorPlugin {
         self.snapshots.retain(|source, _| sources.contains(source));
         self.pending_reimports
             .retain(|source| sources.contains(source));
+        if let Some(dock) = self.dock.as_mut() {
+            dock.bind_mut().set_theme_sources(sources);
+        }
         true
     }
 
@@ -230,13 +267,27 @@ impl ThemosisEditorPlugin {
             self.dependencies
                 .insert(source.clone(), dependencies.clone());
             self.snapshots.insert(source.clone(), current.clone());
+            self.show_outcome(OperationOutcome {
+                operation: Operation::Import,
+                profile: String::new(),
+                source: source.clone(),
+                output: String::new(),
+                status: OutcomeStatus::Success,
+                error: String::new(),
+                diagnostics: Vec::new(),
+                dependencies,
+                elapsed_ms: 0,
+            });
             if stored_fingerprint != fingerprint_snapshot(&current) {
                 self.pending_reimports.insert(source.clone());
+                if let Some(dock) = self.dock.as_mut() {
+                    dock.bind_mut().mark_stale(&source);
+                }
             }
         }
     }
 
-    /// Records an outcome in dependency tracking.
+    /// Records an outcome in dependency tracking and shows it in the dock.
     fn record_outcome(&mut self, outcome: OperationOutcome) {
         let dependencies = if outcome.dependencies.is_empty() {
             vec![outcome.source.clone()]
@@ -249,6 +300,14 @@ impl ThemosisEditorPlugin {
             outcome.source.clone(),
             snapshot(&dependencies, &mut BTreeMap::new()),
         );
+        self.show_outcome(outcome);
+    }
+
+    /// Shows an outcome in the dock without touching dependency tracking.
+    fn show_outcome(&mut self, outcome: OperationOutcome) {
+        if let Some(dock) = self.dock.as_mut() {
+            dock.bind_mut().apply_outcome(outcome);
+        }
     }
 
     /// Reacts to one finished engine import.
@@ -273,6 +332,14 @@ impl ThemosisEditorPlugin {
         self.check_scheduled = true;
         self.base_mut()
             .call_deferred("check_dependency_changes", &[]);
+    }
+
+    fn reimport_one(&mut self, source: GString) {
+        if source.is_empty() {
+            return;
+        }
+        self.pending_reimports.insert(source.to_string());
+        self.reimport_pending();
     }
 
     fn reimport_all(&mut self) {
@@ -303,7 +370,10 @@ impl ThemosisEditorPlugin {
         let mut sources = Vec::new();
         for source in &self.sources {
             if self.pending_reimports.contains(source) {
-                sources.push(source);
+                if let Some(dock) = self.dock.as_mut() {
+                    dock.bind_mut().mark_importing(source);
+                }
+                sources.push(source.clone());
             }
         }
         self.pending_reimports.clear();
@@ -321,12 +391,67 @@ impl ThemosisEditorPlugin {
             packed.push(source.as_str());
         }
         filesystem.reimport_files(&packed);
+        // A failed importer may not emit a usable resource notification on
+        // every supported Godot version, so refresh the structured result
+        // explicitly for the sources the importer did not report. Recompiling
+        // a source whose import failed would otherwise replace its structured
+        // save failure with a bare generation success.
+        for source in sources {
+            if self.reimported.contains(&source) {
+                continue;
+            }
+            let outcome = self
+                .importer
+                .as_mut()
+                .and_then(|importer| importer.bind_mut().take_report(&source))
+                .map_or_else(|| unreported_outcome(&source), report_outcome);
+            self.show_outcome(outcome);
+        }
         self.reimported.clear();
         if let Some(button) = self.button.as_mut() {
             button.set_disabled(false);
             button.set_text("Reimport Themosis");
         }
         self.reimporting = false;
+    }
+
+    fn materialize(&mut self, source: GString, output: GString) {
+        let output = output.to_string();
+        let outcome = builder::materialize_source(&source.to_string(), &output);
+        let succeeded = outcome.ok();
+        self.show_outcome(outcome);
+        if succeeded && let Some(filesystem) = self.filesystem.as_mut() {
+            filesystem.update_file(output.as_str());
+        }
+    }
+
+    fn materialize_all(&mut self, directory: GString) {
+        let batch = builder::materialize_all(&self.sources, &directory.to_string());
+        let updates = batch
+            .results
+            .iter()
+            .filter(|result| result.ok() && !result.output.is_empty())
+            .map(|result| result.output.clone())
+            .collect::<Vec<_>>();
+        if let Some(dock) = self.dock.as_mut() {
+            for result in batch.results.iter().cloned() {
+                dock.bind_mut().apply_outcome(result);
+            }
+        }
+        if let Some(filesystem) = self.filesystem.as_mut() {
+            for output in updates {
+                filesystem.update_file(output.as_str());
+            }
+        }
+        if let Some(dock) = self.dock.as_mut() {
+            dock.bind_mut().show_batch(&batch);
+        }
+    }
+
+    fn open_diagnostic(&mut self, path: GString) {
+        if let Some(mut editor) = self.base().get_editor_interface() {
+            editor.select_file(&path);
+        }
     }
 }
 

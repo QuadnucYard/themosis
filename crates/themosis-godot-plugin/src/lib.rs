@@ -1,14 +1,15 @@
 //! Native Godot resource construction and GDExtension integration for Themosis.
 //!
-//! Compilation and the engine-facing classes live in Rust modules; the
-//! engine-facing classes are thin: they own nodes, run engine virtuals, and
-//! forward events. No Godot dictionary crosses an internal boundary.
+//! Compilation, profile handling, and the editor's state machine live in pure
+//! Rust modules; the engine-facing classes are thin: they own nodes, run engine
+//! virtuals, and forward events. No Godot dictionary crosses an internal
+//! boundary.
 //!
 //! - [`native`]: engine-side services — native theme construction, generation,
 //!   persistence, diagnostics, and the imported-artifact cache contract.
 //! - [`project`]: project state — source discovery, profile configuration, and
 //!   the `res://` source provider.
-//! - [`editor`]: the auto-registered editor plugin and its importer.
+//! - [`editor`]: the auto-registered editor plugin, its importer, and its dock.
 //! - [`runners`]: native main loops for the CLI protocol, profile builds, and
 //!   the import gate.
 //!
