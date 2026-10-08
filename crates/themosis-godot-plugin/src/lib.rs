@@ -5,15 +5,18 @@
 //! forward events. No Godot dictionary crosses an internal boundary.
 //!
 //! - [`native`]: engine-side services — native theme construction, generation,
-//!   persistence, and diagnostics.
-//! - [`project`]: project state — the `res://` source provider.
-//! - [`runners`]: native main loops for the CLI protocol.
+//!   persistence, diagnostics, and the imported-artifact cache contract.
+//! - [`project`]: project state — source discovery and the `res://` source
+//!   provider.
+//! - [`editor`]: the auto-registered editor plugin and its importer.
+//! - [`runners`]: native main loops for the CLI protocol and the import gate.
 //!
-//! The dependency rule is one-way: `runners` use `native` and `project`
-//! services; those service layers never depend on engine-facing classes.
+//! The dependency rule is one-way: `editor` and `runners` use `native` and
+//! `project` services; those service layers never depend on editor classes.
 
 use godot::prelude::*;
 
+mod editor;
 mod native;
 mod project;
 mod runners;

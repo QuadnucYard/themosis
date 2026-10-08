@@ -6,12 +6,29 @@ use std::{
 };
 
 use godot::{
-    classes::{ProjectSettings, ResourceSaver, Theme},
+    classes::{ProjectSettings, ResourceLoader, ResourceSaver, Theme, resource_loader},
     global::Error as GodotError,
     obj::Singleton,
     prelude::*,
 };
 use themosis_godot::RunnerDiagnostic;
+
+/// Loads a native theme from a `res://` source or artifact path.
+///
+/// The deep cache is ignored so a reimport or rematerialized artifact is read
+/// from disk instead of a resource cached earlier in the session.
+pub(crate) fn load_theme(path: &str) -> Option<Gd<Theme>> {
+    let mut loader = ResourceLoader::singleton();
+    if !loader.exists_ex(path).type_hint("Theme").done() {
+        return None;
+    }
+    loader
+        .load_ex(path)
+        .type_hint("Theme")
+        .cache_mode(resource_loader::CacheMode::IGNORE_DEEP)
+        .done()
+        .and_then(|resource| resource.try_cast::<Theme>().ok())
+}
 
 /// Serializes to a unique sibling and atomically replaces the destination.
 /// On failure the old destination remains intact and the temporary is removed.

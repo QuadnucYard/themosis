@@ -2,7 +2,8 @@ use std::collections::BTreeMap;
 
 use godot::{
     builtin::{Color as GodotColor, Corner},
-    classes::{FileAccess, StyleBoxFlat, Theme, file_access::ModeFlags},
+    classes::{FileAccess, ResourceUid, StyleBoxFlat, Theme, file_access::ModeFlags},
+    obj::Singleton,
     prelude::*,
 };
 use themosis_core::{
@@ -13,6 +14,7 @@ use themosis_core::{
 use crate::native::{
     backend::{ThemeBuildError, build_theme},
     generation::generate_from_project_path,
+    import_cache::{content_hash, resolved_uid_path},
 };
 
 #[derive(GodotClass)]
@@ -182,6 +184,34 @@ impl ThemosisBackendTests {
             return false;
         }
         probe_box_color(&current) == Some(GodotColor::BLUE)
+    }
+
+    /// Verifies that a UID dependency fingerprints its current resolution
+    /// together with the resolved file's contents.
+    #[func]
+    fn verify_uid_dependency_fingerprints() -> bool {
+        const PATH: &str = "res://uid_probe.tres";
+        let Some(mut file) = FileAccess::open(PATH, ModeFlags::WRITE) else {
+            return false;
+        };
+        file.store_string(
+            "[gd_resource type=\"GradientTexture2D\" format=3]\n\n[resource]\nwidth = 10\n",
+        );
+
+        let mut uid = ResourceUid::singleton();
+        let id = uid.create_id_for_path(PATH);
+        if id < 0 {
+            return false;
+        }
+        // `create_id_for_path` mints the id; registering it is a separate step.
+        uid.add_id(id, PATH);
+        let reference = uid.id_to_text(id).to_string();
+        if resolved_uid_path(&reference).as_deref() != Some(PATH) {
+            return false;
+        }
+        // The reference must hash its resolution and contents, not just its
+        // identity, or re-pointing the UID would go unnoticed.
+        content_hash(&reference) == format!("{PATH}:{}", content_hash(PATH))
     }
 
     #[func]
