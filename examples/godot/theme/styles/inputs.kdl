@@ -1,0 +1,32 @@
+style LineEdit target=LineEdit {
+    resource font "res://theme/assets/ui_font.tres"
+    resource focus "res://theme/assets/focus_ring.tres"
+    token normal surface.raised
+    token read_only surface.panel
+    token font_color text.primary
+    token font_uneditable_color text.muted
+    token font_placeholder_color text.muted
+    token caret_color brand.hover
+    token selection_color brand.primary
+    token font_size font-size.body
+}
+
+style OptionButton target=OptionButton {
+    resource font "res://theme/assets/ui_font.tres"
+    resource focus "res://theme/assets/focus_ring.tres"
+    resource arrow "res://theme/assets/chevron_down.svg"
+    token normal surface.raised
+    token font_color text.primary
+    token font_hover_color brand.hover
+    token font_pressed_color text.primary
+    token font_size font-size.body
+}
+
+style CheckBox target=CheckBox {
+    resource font "res://theme/assets/ui_font.tres"
+    resource focus "res://theme/assets/focus_ring.tres"
+    token font_color text.primary
+    token font_hover_color brand.hover
+    token font_pressed_color text.primary
+    token font_size font-size.body
+}

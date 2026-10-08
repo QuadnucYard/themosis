@@ -1,0 +1,30 @@
+style VBoxContainer target=VBoxContainer {
+    token separation spacing.stack
+}
+
+style ContentStack target=VBoxContainer extends=VBoxContainer {
+    token separation spacing.section
+}
+
+style HBoxContainer target=HBoxContainer {
+    token separation spacing.inline
+}
+
+style GridContainer target=GridContainer {
+    token h_separation spacing.grid
+    token v_separation spacing.grid
+}
+
+style PageMargins target=MarginContainer {
+    token margin_left spacing.page-horizontal
+    token margin_top spacing.page-vertical
+    token margin_right spacing.page-horizontal
+    token margin_bottom spacing.page-vertical
+}
+
+style CardMargins target=MarginContainer {
+    token margin_left spacing.card
+    token margin_top spacing.card
+    token margin_right spacing.card
+    token margin_bottom spacing.card
+}

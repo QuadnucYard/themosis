@@ -1,0 +1,11 @@
+// Swap only the palette token document to create the dark variant.
+theme Application {
+    tokens "tokens/common.tokens.json"
+    tokens "tokens/dark.tokens.json"
+    import "styles/surfaces.kdl"
+    import "styles/typography.kdl"
+    import "styles/buttons.kdl"
+    import "styles/layout.kdl"
+    import "styles/inputs.kdl"
+    import "styles/feedback.kdl"
+}

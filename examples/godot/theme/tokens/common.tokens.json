@@ -1,0 +1,20 @@
+{
+  "font-size": {
+	"$type": "number",
+	"app-title": { "$value": 32 },
+	"section-title": { "$value": 22 },
+	"body": { "$value": 16 },
+	"status": { "$value": 14 },
+	"button": { "$value": 17 }
+  },
+  "spacing": {
+	"$type": "dimension",
+	"inline": { "$value": { "value": 10, "unit": "px" } },
+	"stack": { "$value": { "value": 14, "unit": "px" } },
+	"grid": { "$value": { "value": 18, "unit": "px" } },
+	"section": { "$value": { "value": 24, "unit": "px" } },
+	"card": { "$value": { "value": 24, "unit": "px" } },
+	"page-horizontal": { "$value": { "value": 48, "unit": "px" } },
+	"page-vertical": { "$value": { "value": 36, "unit": "px" } }
+  }
+}

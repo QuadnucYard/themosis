@@ -5,8 +5,19 @@ target/
 # Ignore everything else at root
 /*
 
+# Local notes and scratch files: intentionally untracked, never force-added
+# (`IMPLEMENTATION_PLAN.md`, `TODO.md`, and `design-notes.md` are working
+# material; maintained documentation lives in `docs/`.)
+IMPLEMENTATION_PLAN.md
+TODO.md
+design-notes.md
+deps.dot
+bak/
+plugin/
+
 # Repository metadata
 !.gitignore
+!.gitattributes
 !.github/
 
 # Documentation
@@ -27,6 +38,8 @@ target/
 # Source code
 !crates/
 !crates/**
+!/examples/
+!/scripts/
 
 # Godot
 **/.godot/

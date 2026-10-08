@@ -1,0 +1,7 @@
+style ProgressBar target=ProgressBar {
+    resource font "res://theme/assets/ui_font.tres"
+    token background surface.raised
+    token fill brand.primary
+    token font_color text.on-accent
+    token font_size font-size.status
+}
