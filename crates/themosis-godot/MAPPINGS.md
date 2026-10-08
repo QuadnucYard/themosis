@@ -79,7 +79,8 @@ shared component fragments conventionally remain `.kdl` files.
 The imported resource stores a deterministic dependency fingerprint. On editor
 startup and while the editor is open, the plugin recompiles only roots affected
 by changed KDL, token JSON, or referenced `res://` resources. **Reimport** and
-**Reimport all** expose the same operation on demand. **Materialize** is the
+**Reimport all** expose the same operation on demand, and a failed reimport
+keeps the previous cache so previews stay available. **Materialize** is the
 explicit alternative when a stable, visible `.tres` output is required.
 
 Targeted commands require the Themosis addon in the project: the CLI loads the
@@ -149,18 +150,13 @@ without replacing resources held by a previously generated Theme. A failed
 rebuild therefore leaves the last valid preview intact.
 
 The CLI supplies an inert runner scene, so checking or building a theme does not
-require a configured application main scene. Native materialization validates
-project confinement and saves through a unique temporary sibling before an
-atomic replacement. Runner diagnostics preserve source byte spans as well as
-line/column locations and native item context.
+require a configured application main scene. Runner diagnostics preserve source
+byte spans as well as line/column locations and native item context.
 
-Imported themes persist dependency paths and their content fingerprint. Startup
-checks the manifest without recompiling unaffected roots. Failed dependency
-reimports report errors and preserve the previous cache for previews. Godot's
-`--editor --import` exit status alone is not a validation gate. Before exporting
-imported themes, run `godot --headless --path . --main-loop ThemosisCheckRunner`;
-it exits nonzero for invalid sources or stale imports. Discovery skips hidden
-and linked directories.
+Godot's `--editor --import` exit status alone is not a validation gate: run the
+`ThemosisCheckRunner` validation before exporting imported themes, and treat a
+nonzero exit as a stop-the-pipeline failure. Discovery skips hidden and linked
+directories.
 
 Addon materialization and profile configuration saves use the native persistence
 service. A unique temporary sibling is removed on failure; successful saves

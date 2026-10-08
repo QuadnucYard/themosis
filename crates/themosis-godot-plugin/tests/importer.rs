@@ -101,13 +101,16 @@ fn editor_sessions_reimport_changed_dependencies_without_losing_callbacks() {
 
     project.write("theme/tokens.json", r#"{"background":{"$type":"color","$value":{"colorSpace":"srgb","components":[0.9,0.2,0.3],"alpha":1}}}"#);
     let session = project.run_editor_session(&executable, 300, "session.log");
+    assert!(session.status.success(), "{}", support::messages(&session));
     support::assert_no_rust_failures(&session, &project.log("session.log"));
 
     let manifest = project.imported_theme_text().expect("refreshed theme text");
     let second = fingerprint(&manifest).expect("manifest fingerprint");
     assert_ne!(
-        first, second,
-        "a live editor session must reimport the theme after a dependency changed"
+        first,
+        second,
+        "a live editor session must reimport the theme after a dependency changed:\n{}",
+        support::messages(&session)
     );
 }
 

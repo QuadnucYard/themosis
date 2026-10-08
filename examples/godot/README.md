@@ -11,8 +11,7 @@ cargo build -p themosis-godot-plugin
 godot --editor --path examples/godot
 ```
 
-Run the project and press **Light** or **Dark**. The application still switches
-the entire native theme with only this:
+Run the project and press **Light** or **Dark**:
 
 ```gdscript
 const THEMES := {
@@ -61,29 +60,14 @@ missing support instead of silently omitting it.
 
 ## Editor workflow
 
-The bundled **Themosis** plugin auto-registers while the editor loads the
-extension and contributes its dock. It discovers every `.tms` recursively and
-offers:
-
-- **Reimport** for the selected root and **Reimport all** globally.
-- A live native preview and structured diagnostics.
-- **Materialize…** for an explicit stable `.tres` output.
-- **All…** to materialize every root into one directory.
-
-Imported output belongs to Godot under `.godot/imported`; scenes reference the
-source paths directly. Dependency fingerprints survive editor restarts. A
-change to shared `buttons.kdl` refreshes both roots, while a change to
-`light.tokens.json` refreshes only `light.tms`.
-
-The importer and the dock run entirely in the GDExtension and never spawn the
-CLI. The optional `themosis.godot.json` profiles are only stable headless
-materialization presets:
-
-```sh
-godot --headless --editor --path examples/godot --import
-godot --headless --path examples/godot \
-  --main-loop ThemosisBuildRunner -- --all
-```
+The bundled Themosis plugin auto-registers while the editor loads the extension
+and contributes its dock; the
+[addon guide](../../crates/themosis-godot-plugin/addon/README.md) covers its
+reimport, preview, diagnostic, and materialization features. Dependency
+fingerprints survive editor restarts: a change to shared `buttons.kdl` refreshes
+both roots, while a change to `light.tokens.json` refreshes only `light.tms`.
+The optional `themosis.godot.json` profiles configure stable headless
+materialization.
 
 ## Package the addon
 
@@ -91,25 +75,15 @@ godot --headless --path examples/godot \
 just package-plugin
 ```
 
-This creates a platform-qualified development archive under `dist/`. Tagged
-releases combine Linux x86_64, Windows x86_64, and macOS x86_64/arm64 native
-libraries. Extract an archive into another project; the native editor plugin
-activates with the extension.
+This writes a development archive under `dist/`. The example consumes the addon
+the way a project does: the manifest under `addons/themosis/` registers the
+extension, and the archive carries the same layout. See the
+[addon guide](../../crates/themosis-godot-plugin/addon/README.md) for
+installation and export details.
 
-See the [addon guide](../../crates/themosis-godot-plugin/addon/README.md) for
-installation, export, materialization, and optional runtime compilation
-details. The example consumes the addon the way a project does: the manifest
-under `addons/themosis/` registers the extension, and `just package-plugin`
-produces the distributable archive of the same layout.
+## Validate imports before export
 
-Before exporting imported `.tms` assets, validate their current sources and
-fingerprints. Godot's `--import` exit status alone is not sufficient:
-
-```sh
-godot --headless --editor --path examples/godot --import
-godot --headless --path examples/godot --main-loop ThemosisCheckRunner
-```
-
-The second command exits nonzero for invalid or stale imports; stop the export
-pipeline when it fails. Materialization and validation results are shown
-separately from the imported asset's freshness in the dock.
+Before exporting imported `.tms` assets, run the addon's validation gate; it
+exits nonzero for invalid or stale imports, so stop the export pipeline when it
+fails. The [addon guide](../../crates/themosis-godot-plugin/addon/README.md)
+documents the commands.

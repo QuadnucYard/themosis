@@ -379,17 +379,12 @@ impl ProbeProject {
 
     /// Runs an editor session that stays alive for `frames` engine frames.
     ///
-    /// `--fixed-fps` decouples engine time from wall time, so timers (like the
-    /// plugin's dependency reimport timer) fire deterministically.
+    /// `--max-fps` gives the filesystem worker real time to finish scanning.
+    /// `--fixed-fps` can exhaust the frame budget before that worker completes,
+    /// leaving the plugin's deferred dependency check unprocessed.
     pub fn run_editor_session(&self, executable: &str, frames: u32, log_name: &str) -> Output {
         Command::new(executable)
-            .args([
-                "--headless",
-                "--editor",
-                "--fixed-fps",
-                "60",
-                "--quit-after",
-            ])
+            .args(["--headless", "--editor", "--max-fps", "60", "--quit-after"])
             .arg(frames.to_string())
             .arg("--path")
             .arg(self.path())
