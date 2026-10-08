@@ -78,6 +78,39 @@ fn headless_import_refreshes_dependencies_and_rejects_invalid_edits() {
     );
 }
 
+/// Editing a dependency inside a live editor session must reimport the theme
+/// without dropping the plugin's own signal callbacks, and without leaving the
+/// artifact stale.
+#[test]
+fn editor_sessions_reimport_changed_dependencies_without_losing_callbacks() {
+    let Some(executable) = support::godot() else {
+        return;
+    };
+    let Some(project) = ProbeProject::new() else {
+        return;
+    };
+    project.write_theme_fixture();
+    let imported = import(&project, &executable, "session-import.log");
+    assert!(
+        imported.status.success(),
+        "{}",
+        support::messages(&imported)
+    );
+    let manifest = project.imported_theme_text().expect("cached theme text");
+    let first = fingerprint(&manifest).expect("manifest fingerprint");
+
+    project.write("theme/tokens.json", r#"{"background":{"$type":"color","$value":{"colorSpace":"srgb","components":[0.9,0.2,0.3],"alpha":1}}}"#);
+    let session = project.run_editor_session(&executable, 300, "session.log");
+    support::assert_no_rust_failures(&session, &project.log("session.log"));
+
+    let manifest = project.imported_theme_text().expect("refreshed theme text");
+    let second = fingerprint(&manifest).expect("manifest fingerprint");
+    assert_ne!(
+        first, second,
+        "a live editor session must reimport the theme after a dependency changed"
+    );
+}
+
 #[test]
 fn imported_artifacts_persist_their_dependency_manifest_and_fingerprint() {
     let Some(executable) = support::godot() else {

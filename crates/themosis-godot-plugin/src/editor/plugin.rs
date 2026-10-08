@@ -166,8 +166,10 @@ impl ThemosisEditorPlugin {
         // Registering an importer normally schedules discovery. An explicit
         // scan also handles .tms files that predate plugin activation.
         self.waiting_for_initial_scan = true;
-        if let Some(filesystem) = self.filesystem.as_mut() {
-            filesystem.scan();
+        if let Some(mut filesystem) = self.filesystem.clone() {
+            self.absorb_reentry(|| {
+                filesystem.scan();
+            });
         }
     }
 
@@ -354,7 +356,7 @@ impl ThemosisEditorPlugin {
         if self.reimporting || self.pending_reimports.is_empty() {
             return;
         }
-        let Some(filesystem) = self.filesystem.as_mut() else {
+        let Some(mut filesystem) = self.filesystem.clone() else {
             return;
         };
         for source in &self.pending_reimports {
@@ -390,12 +392,16 @@ impl ThemosisEditorPlugin {
         for source in &sources {
             packed.push(source.as_str());
         }
-        filesystem.reimport_files(&packed);
+        self.absorb_reentry(|| {
+            filesystem.reimport_files(&packed);
+        });
         // A failed importer may not emit a usable resource notification on
         // every supported Godot version, so refresh the structured result
         // explicitly for the sources the importer did not report. Recompiling
         // a source whose import failed would otherwise replace its structured
-        // save failure with a bare generation success.
+        // save failure with a bare generation success. These fallback outcomes
+        // go through dependency tracking so an unreported source is not
+        // treated as perpetually stale.
         for source in sources {
             if self.reimported.contains(&source) {
                 continue;
@@ -405,7 +411,7 @@ impl ThemosisEditorPlugin {
                 .as_mut()
                 .and_then(|importer| importer.bind_mut().take_report(&source))
                 .map_or_else(|| unreported_outcome(&source), report_outcome);
-            self.show_outcome(outcome);
+            self.record_outcome(outcome);
         }
         self.reimported.clear();
         if let Some(button) = self.button.as_mut() {
@@ -420,8 +426,10 @@ impl ThemosisEditorPlugin {
         let outcome = builder::materialize_source(&source.to_string(), &output);
         let succeeded = outcome.ok();
         self.show_outcome(outcome);
-        if succeeded && let Some(filesystem) = self.filesystem.as_mut() {
-            filesystem.update_file(output.as_str());
+        if succeeded && let Some(mut filesystem) = self.filesystem.clone() {
+            self.absorb_reentry(|| {
+                filesystem.update_file(output.as_str());
+            });
         }
     }
 
@@ -438,10 +446,12 @@ impl ThemosisEditorPlugin {
                 dock.bind_mut().apply_outcome(result);
             }
         }
-        if let Some(filesystem) = self.filesystem.as_mut() {
-            for output in updates {
-                filesystem.update_file(output.as_str());
-            }
+        if let Some(mut filesystem) = self.filesystem.clone() {
+            self.absorb_reentry(|| {
+                for output in &updates {
+                    filesystem.update_file(output.as_str());
+                }
+            });
         }
         if let Some(dock) = self.dock.as_mut() {
             dock.bind_mut().show_batch(&batch);
@@ -452,6 +462,20 @@ impl ThemosisEditorPlugin {
         if let Some(mut editor) = self.base().get_editor_interface() {
             editor.select_file(&path);
         }
+    }
+
+    /// Runs an engine call that can synchronously re-enter this plugin.
+    ///
+    /// `EditorFileSystem` emits `filesystem_changed`, and an import runs the
+    /// importer, which emits `import_completed` — both while the engine call
+    /// is still on the stack. The live `base_mut()` guard marks this plugin's
+    /// Rust borrow as inaccessible for the duration, so those signal callbacks
+    /// may borrow the plugin again instead of failing the borrow safeguard and
+    /// losing the callback. The closure must only touch engine handles that do
+    /// not borrow `self`.
+    fn absorb_reentry(&mut self, engine_call: impl FnOnce()) {
+        let _guard = self.base_mut();
+        engine_call();
     }
 }
 

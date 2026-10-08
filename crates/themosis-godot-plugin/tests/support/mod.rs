@@ -200,6 +200,28 @@ pub fn messages(output: &Output) -> String {
     )
 }
 
+/// Rust failure markers a successful Godot session must not contain.
+///
+/// A panic inside a signal callback does not change the process's exit status;
+/// the engine logs it as an error line and continues, so a session can exit
+/// zero after a callback was dropped.
+const RUST_FAILURE_MARKERS: &[&str] = &["[panic", "Error calling from signal"];
+
+/// Fails when a Godot session logged a Rust panic or a failed callback.
+pub fn assert_no_rust_failures(output: &Output, log: &Path) {
+    let mut text = messages(output);
+    if let Ok(logged) = std::fs::read_to_string(log) {
+        text.push('\n');
+        text.push_str(&logged);
+    }
+    for marker in RUST_FAILURE_MARKERS {
+        assert!(
+            !text.contains(marker),
+            "Godot session recorded a Rust failure ('{marker}'):\n{text}"
+        );
+    }
+}
+
 /// A throwaway Godot project that registers the built extension and probes.
 pub struct ProbeProject {
     directory: TempDir,
@@ -353,6 +375,28 @@ impl ProbeProject {
             .arg("--import")
             .output()
             .expect("Godot project import starts")
+    }
+
+    /// Runs an editor session that stays alive for `frames` engine frames.
+    ///
+    /// `--fixed-fps` decouples engine time from wall time, so timers (like the
+    /// plugin's dependency reimport timer) fire deterministically.
+    pub fn run_editor_session(&self, executable: &str, frames: u32, log_name: &str) -> Output {
+        Command::new(executable)
+            .args([
+                "--headless",
+                "--editor",
+                "--fixed-fps",
+                "60",
+                "--quit-after",
+            ])
+            .arg(frames.to_string())
+            .arg("--path")
+            .arg(self.path())
+            .arg("--log-file")
+            .arg(self.log(log_name))
+            .output()
+            .expect("Godot editor session starts")
     }
 
     /// Returns the imported cache entry for the probe theme, when it exists.
