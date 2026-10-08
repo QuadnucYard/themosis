@@ -98,18 +98,19 @@ pub enum ThemeBuildError {
     /// The running engine rejected one or more native mappings.
     #[error("{0}")]
     Native(#[source] NativeDiagnostics),
-    /// The embedded builder could not be executed or returned malformed data.
-    #[error("native Godot builder failed: {0}")]
-    Builder(String),
 }
 
 impl ThemeBuildError {
     /// Returns native runtime diagnostics, when the builder reached mapping.
+    ///
+    /// Only the `test-support` probes read the structured diagnostics back out
+    /// of a failed build; production consumers format [`ThemeBuildError`].
+    #[cfg(feature = "test-support")]
     #[must_use]
     pub fn native_diagnostics(&self) -> Option<&[NativeDiagnostic]> {
         match self {
             Self::Native(diagnostics) => Some(diagnostics.errors()),
-            Self::Preparation(_) | Self::Builder(_) => None,
+            Self::Preparation(_) => None,
         }
     }
 }

@@ -136,6 +136,12 @@ impl PlannedItem {
     pub const fn value(&self) -> &PreparedValue {
         &self.value
     }
+
+    /// Returns the source value category used in runtime diagnostics.
+    #[must_use]
+    pub const fn value_kind(&self) -> &'static str {
+        self.value_kind
+    }
 }
 
 // This is manual because core `Name` values and candidate categories need their
@@ -148,7 +154,7 @@ impl Serialize for PlannedItem {
         let candidates = self
             .candidates
             .iter()
-            .map(|candidate| candidate.wire_name())
+            .map(|candidate| candidate.as_str())
             .collect::<Vec<_>>();
         let mut item = serializer.serialize_struct("PlannedItem", 5)?;
         item.serialize_field("property", self.property.as_str())?;
@@ -222,7 +228,8 @@ pub enum GodotItemKind {
 
 impl GodotItemKind {
     /// Returns the category spelling consumed by the Godot runtime builder.
-    const fn wire_name(self) -> &'static str {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Color => "color",
             Self::Constant => "constant",

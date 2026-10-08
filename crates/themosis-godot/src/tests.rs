@@ -5,10 +5,7 @@ use themosis_core::{
     Number, ResolvedTokens, ResourceRef,
 };
 
-use crate::{
-    BackendError, BackendErrors, NATIVE_THEME_BUILDER_GDSCRIPT, NATIVE_THEME_RUNNER_GDSCRIPT,
-    plan_theme,
-};
+use crate::{BackendError, BackendErrors, plan_theme};
 
 fn name(value: &str) -> Name {
     Name::new(value).expect("name is valid")
@@ -122,6 +119,4 @@ fn serializes_portable_runtime_build_plan() {
         json["styles"][0]["items"][0]["value"],
         serde_json::json!({"kind": "color", "rgba": [0.1, 0.2, 0.3, 1.0]})
     );
-    assert!(NATIVE_THEME_BUILDER_GDSCRIPT.contains("func build_plan(plan: Dictionary)"));
-    assert!(NATIVE_THEME_RUNNER_GDSCRIPT.contains("ResourceSaver.save(theme, temporary)"));
 }

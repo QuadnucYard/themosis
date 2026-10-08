@@ -10,19 +10,21 @@ publish.workspace = true
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[features]
+default = []
+# Native probe classes driving the Godot-backed test suites. Never enable in a
+# distributed build: `just package-plugin` builds with default features only.
+test-support = []
+
 [dependencies]
 themosis.workspace = true
-themosis-compiler.workspace = true
 themosis-core.workspace = true
 themosis-godot.workspace = true
 themosis-kdl.workspace = true
-themosis-tokens.workspace = true
 
 godot.workspace = true
-serde_json.workspace = true
 thiserror.workspace = true
 
-[dev-dependencies]
 tempfile.workspace = true
 
 [lints]

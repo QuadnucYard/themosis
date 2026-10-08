@@ -18,11 +18,18 @@ style PrimaryButton target=Button extends=Button {
 }
 ```
 
-The Godot integration is split across two crates and a shared native builder:
+The Godot integration is split across two crates, and one native implementation
+serves every runtime path:
 
-- `themosis-godot` validates portable constraints and produces a serializable build plan without depending on `godot-rust`. It also supplies the engine-native GDScript builder.
-- Both consumers pass that same plan to that same builder. The CLI runner starts a selected headless Godot executable, checks its version, and saves the returned `Theme` as `.tres` through `ResourceSaver`. The plugin executes the builder in the engine that loaded the GDExtension and returns the live `Theme` object; its editor importer never shells out to the CLI.
-- `themosis-godot-plugin` uses `godot` for GDExtension, project I/O, and live Godot objects; it does not maintain a second mapping implementation.
+- `themosis-godot` validates portable constraints and produces a serializable build plan without depending on `godot-rust`.
+- `themosis-godot-plugin` resolves and applies that plan inside Godot. It reads `ThemeDB.get_default_theme()`, walks each target's live `ClassDB` hierarchy, and writes the resolved items onto a native `Theme`. The editor importer, the editor dock and builder, the headless runners, and the native CLI runner (`ThemosisCliRunner`) all construct themes through this one implementation, so they cannot diverge.
+- The addon is entirely native: it registers its editor plugin, importer, dock, and runners with the engine and exposes no scripting API. Editor integration, materialization, and headless commands call the same Rust code paths; the only Godot values crossing a boundary are engine notifications (signals) and the native controls and resources the addon owns.
+- `themosis-cli` starts a headless Godot process with the target project loaded and `--main-loop ThemosisCliRunner`, passing a versioned JSON request and reading a versioned JSON response. No GDScript participates in mapping or process control.
+
+The runner protocol is defined once in `themosis-godot`'s `runner` module and
+carries an explicit schema version independent of the crate versions, so an
+incompatible addon is rejected with `protocol_version_mismatch` rather than
+misinterpreted.
 
 `themosis-godot` contains neither a version-specific class/property catalog nor a handwritten `.tres` serializer. Godot itself is the metadata and serialization authority. The `godot-rust` dependency belongs only to `themosis-godot-plugin`; the reusable crate remains usable by the CLI without linking Godot.
 
@@ -75,7 +82,8 @@ by changed KDL, token JSON, or referenced `res://` resources. **Reimport** and
 **Reimport all** expose the same operation on demand. **Materialize** is the
 explicit alternative when a stable, visible `.tres` output is required.
 
-Generate a native theme without loading the plugin:
+Targeted commands require the Themosis addon in the project: the CLI loads the
+project, so the native runner must be available as `ThemosisCliRunner`.
 
 ```sh
 # Engine-independent source check.
@@ -91,11 +99,27 @@ themosis godot build \
   theme/application.kdl
 ```
 
-The CLI accepts `--godot FILE`, then `THEMOSIS_GODOT_BINARY`, then searches for `godot` or `godot4`. The executing engine must be Godot 4.5 or newer; there is no upper-version selection table because its live `ClassDB`, default `Theme`, and `ResourceLoader` decide availability. CI exercises the minimum 4.5 runtime and a newer stable runtime.
+The CLI accepts filesystem sources inside the project or `res://` sources, and
+infers the project from the source or the current directory unless `--project`
+is supplied. It accepts `--godot FILE`, then `THEMOSIS_GODOT_BINARY`, then
+searches for `godot` or `godot4`. The executing engine must be Godot 4.5 or
+newer; there is no upper-version selection table because its live `ClassDB`,
+default `Theme`, and `ResourceLoader` decide availability. CI exercises the 4.5,
+4.6, and 4.7 stable runtimes.
 
-Use `--require-version 4.5.0` to reject any runtime whose numeric `MAJOR.MINOR.PATCH` differs, or omit it to accept the 4.5 lower bound and later compatible versions. Successful commands report the engine's display version and commit hash. `--timeout SECONDS` changes the default 120-second limit.
+Use `--require-version 4.5.0` to reject any runtime whose numeric
+`MAJOR.MINOR.PATCH` differs, or omit it to accept the 4.5 lower bound and later
+compatible versions. Successful commands report the engine's display version and
+commit hash. `--timeout SECONDS` changes the default 120-second limit.
 
-Output must resolve inside the canonical project directory. Parent symlinks that escape the project are rejected before Godot starts, and validation does not create output directories. Generation saves a temporary sibling and replaces the requested output only after compilation, live mapping, native construction, and `ResourceSaver` serialization succeed, so mapping and version failures preserve an existing file. Use the same exact Godot version for generation and project export when byte-for-byte reproducibility or exact cross-version compatibility matters.
+Both source and output must resolve inside the canonical project directory.
+Parent symlinks that escape the project are rejected before Godot starts, and
+validation does not create output directories. Generation saves a temporary
+sibling and replaces the requested output only after compilation, live mapping,
+native construction, and `ResourceSaver` serialization succeed, so mapping and
+version failures preserve an existing file. Use the same exact Godot version for
+generation and project export when byte-for-byte reproducibility or exact
+cross-version compatibility matters.
 
 ## Portable diagnostic codes
 
@@ -113,3 +137,32 @@ The engine-native builder returns symbolic codes such as
 `unsupported_property`, `ambiguous_property`, and `incompatible_stylebox`.
 The GDExtension preserves these codes and renders each native failure through
 the same `error[CODE]: message` diagnostic envelope as portable failures.
+
+A numeric item resolves to `constant` or `font_size` only when the target's
+enumerated theme item list contains the property name. `Theme.has_font_size()`
+and `Theme.has_font()` cannot be used for that check: they fall back to the
+theme's default font size and default font and report true for any name on every
+supported Godot version, measured on 4.5, 4.6 and 4.7.
+
+Each generation reads referenced resources and their external dependencies afresh,
+without replacing resources held by a previously generated Theme. A failed
+rebuild therefore leaves the last valid preview intact.
+
+The CLI supplies an inert runner scene, so checking or building a theme does not
+require a configured application main scene. Native materialization validates
+project confinement and saves through a unique temporary sibling before an
+atomic replacement. Runner diagnostics preserve source byte spans as well as
+line/column locations and native item context.
+
+Imported themes persist dependency paths and their content fingerprint. Startup
+checks the manifest without recompiling unaffected roots. Failed dependency
+reimports report errors and preserve the previous cache for previews. Godot's
+`--editor --import` exit status alone is not a validation gate. Before exporting
+imported themes, run `godot --headless --path . --main-loop ThemosisCheckRunner`;
+it exits nonzero for invalid sources or stale imports. Discovery skips hidden
+and linked directories.
+
+Addon materialization and profile configuration saves use the native persistence
+service. A unique temporary sibling is removed on failure; successful saves
+atomically replace the selected destination without using user-visible temporary
+or backup names. Parent symlinks that escape the project are rejected.

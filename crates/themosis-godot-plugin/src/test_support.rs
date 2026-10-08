@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use godot::{
     builtin::{Color as GodotColor, Corner},
-    classes::StyleBoxFlat,
+    classes::{FileAccess, StyleBoxFlat, Theme, file_access::ModeFlags},
     prelude::*,
 };
 use themosis_core::{
@@ -10,7 +10,10 @@ use themosis_core::{
     Name, Number, ResolvedTokens, ResourceRef,
 };
 
-use crate::{ThemeBuildError, build_theme};
+use crate::native::{
+    backend::{ThemeBuildError, build_theme},
+    generation::generate_from_project_path,
+};
 
 #[derive(GodotClass)]
 #[class(init, base=RefCounted)]
@@ -117,11 +120,10 @@ impl ThemosisBackendTests {
         let Ok(theme) = build_theme(&compiled) else {
             return false;
         };
-        let variation = StringName::from("ProbeButton");
-        let Some(normal) = theme.get_stylebox(&StringName::from("normal"), &variation) else {
+        let Some(normal) = theme.get_stylebox("normal", "ProbeButton") else {
             return false;
         };
-        let Some(hover) = theme.get_stylebox(&StringName::from("hover"), &variation) else {
+        let Some(hover) = theme.get_stylebox("hover", "ProbeButton") else {
             return false;
         };
         let Ok(normal) = normal.try_cast::<StyleBoxFlat>() else {
@@ -130,35 +132,56 @@ impl ThemosisBackendTests {
         let Ok(hover) = hover.try_cast::<StyleBoxFlat>() else {
             return false;
         };
-        let Some(focus) = theme.get_stylebox(&StringName::from("focus"), &variation) else {
+        let Some(focus) = theme.get_stylebox("focus", "ProbeButton") else {
             return false;
         };
         let Ok(focus) = focus.try_cast::<StyleBoxFlat>() else {
             return false;
         };
 
-        theme.get_type_variation_base(&variation) == "Button"
-            && theme
-                .get_type_variation_base(&StringName::from("Label"))
-                .is_empty()
-            && theme.get_color(&StringName::from("font_color"), &StringName::from("Label"))
-                == to_godot_color(text_color)
-            && theme.get_font_size(&StringName::from("font_size"), &variation) == 18
-            && theme
-                .get_font(&StringName::from("font"), &variation)
-                .is_some()
-            && theme
-                .get_icon(&StringName::from("arrow"), &StringName::from("ProbeOption"))
-                .is_some()
-            && theme.get_constant(
-                &StringName::from("separation"),
-                &StringName::from("ProbeStack"),
-            ) == 12
-            && theme.get_color(&StringName::from("font_color"), &variation)
-                == to_godot_color(text_color)
+        theme.get_type_variation_base("ProbeButton") == "Button"
+            && theme.get_type_variation_base("Label").is_empty()
+            && theme.get_color("font_color", "Label") == to_godot_color(text_color)
+            && theme.get_font_size("font_size", "ProbeButton") == 18
+            && theme.get_font("font", "ProbeButton").is_some()
+            && theme.get_icon("arrow", "ProbeOption").is_some()
+            && theme.get_constant("separation", "ProbeStack") == 12
+            && theme.get_color("font_color", "ProbeButton") == to_godot_color(text_color)
             && normal.get_bg_color() == to_godot_color(base_background)
             && hover.get_bg_color() == to_godot_color(hover_background)
             && focus.get_corner_radius(Corner::TOP_LEFT) == 9
+    }
+
+    /// Verifies that recompiling a theme reads edited resources while leaving
+    /// the previously compiled theme untouched.
+    #[func]
+    fn verify_fresh_resources() -> bool {
+        const SOURCE: &str = "res://theme.tms";
+        if !write_probe_box("StyleBoxFlat", "bg_color = Color(1, 0, 0, 1)") {
+            return false;
+        }
+        let Ok(previous) = generate_from_project_path(SOURCE).result else {
+            return false;
+        };
+        if !write_probe_box("StyleBoxFlat", "bg_color = Color(0, 0, 1, 1)") {
+            return false;
+        }
+        let Ok(current) = generate_from_project_path(SOURCE).result else {
+            return false;
+        };
+        if probe_box_color(&current) != Some(GodotColor::BLUE) {
+            return false;
+        }
+        if probe_box_color(&previous) != Some(GodotColor::RED) {
+            return false;
+        }
+        if !write_probe_box("SystemFont", "") {
+            return false;
+        }
+        if generate_from_project_path(SOURCE).result.is_ok() {
+            return false;
+        }
+        probe_box_color(&current) == Some(GodotColor::BLUE)
     }
 
     #[func]
@@ -281,4 +304,23 @@ impl ThemosisBackendTests {
             && state_override_rejected
             && godot_reference_rejected
     }
+}
+
+/// Writes the probe resource the fresh-resource fixture theme references.
+fn write_probe_box(kind: &str, properties: &str) -> bool {
+    let Some(mut file) = FileAccess::open("res://box.tres", ModeFlags::WRITE) else {
+        return false;
+    };
+    file.store_string(&format!(
+        "[gd_resource type=\"{kind}\" format=3]\n[resource]\n{properties}\n"
+    ));
+    true
+}
+
+/// Returns the probe stylebox background, when the theme defines one.
+fn probe_box_color(theme: &Gd<Theme>) -> Option<GodotColor> {
+    theme
+        .get_stylebox("normal", "Probe")
+        .and_then(|stylebox| stylebox.try_cast::<StyleBoxFlat>().ok())
+        .map(|stylebox| stylebox.get_bg_color())
 }
