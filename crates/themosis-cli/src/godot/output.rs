@@ -112,7 +112,7 @@ fn resolve_output_location(project: &Path, output: &Path) -> Result<PathBuf, Str
     Ok(canonical.join(suffix))
 }
 
-fn safe_relative_path(path: &Path) -> Result<PathBuf, String> {
+pub(super) fn safe_relative_path(path: &Path) -> Result<PathBuf, String> {
     let mut safe = PathBuf::new();
     for component in path.components() {
         match component {
@@ -120,19 +120,19 @@ fn safe_relative_path(path: &Path) -> Result<PathBuf, String> {
             Component::CurDir => {}
             Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
                 return Err(format!(
-                    "Godot res:// output '{}' must stay inside the project",
+                    "Godot res:// path '{}' must stay inside the project",
                     path.display()
                 ));
             }
         }
     }
     if safe.as_os_str().is_empty() {
-        return Err("Godot theme output must name a file below res://".to_owned());
+        return Err("Godot res:// path must name a file below res://".to_owned());
     }
     Ok(safe)
 }
 
-fn slash_path(path: &Path) -> Result<String, String> {
+pub(super) fn slash_path(path: &Path) -> Result<String, String> {
     path.components()
         .map(|component| match component {
             Component::Normal(component) => component

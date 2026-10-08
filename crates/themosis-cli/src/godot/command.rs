@@ -4,7 +4,7 @@ use std::{path::PathBuf, process::ExitCode};
 
 use clap::{Args, Subcommand};
 
-use super::runtime::RuntimeOptions;
+use super::runtime::{RunError, RuntimeOptions};
 
 const FAILURE: u8 = 1;
 
@@ -61,6 +61,7 @@ impl GodotCheck {
                 println!(
                     "Godot mappings for '{}' validate successfully with {version}",
                     self.root.display(),
+                    version = version.label(),
                 );
                 ExitCode::SUCCESS
             }
@@ -72,10 +73,10 @@ impl GodotCheck {
 impl GodotBuild {
     fn run(self) -> ExitCode {
         match self.runtime.build(&self.root, &self.output) {
-            Ok(version) => {
+            Ok((version, output)) => {
                 println!(
                     "generated Godot theme at '{output}' with {version}",
-                    output = self.output.display()
+                    version = version.label(),
                 );
                 ExitCode::SUCCESS
             }
@@ -84,7 +85,7 @@ impl GodotBuild {
     }
 }
 
-fn report(error: String) -> ExitCode {
+fn report(error: RunError) -> ExitCode {
     eprintln!("themosis: Godot operation failed:\n{error}");
     ExitCode::from(FAILURE)
 }

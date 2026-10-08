@@ -1,7 +1,7 @@
 //! Project-aware Godot runner execution.
 
 use std::{
-    env, fs,
+    env, fmt, fs,
     fs::File,
     path::{Path, PathBuf},
     process::{Command, ExitStatus, Stdio},
@@ -10,12 +10,13 @@ use std::{
 };
 
 use clap::Args;
-use serde_json::{Value, json};
 use tempfile::{Builder as TempDirBuilder, TempDir};
-use themosis_godot::{GodotBuildPlan, NATIVE_THEME_BUILDER_GDSCRIPT, NATIVE_THEME_RUNNER_GDSCRIPT};
+use themosis_godot::{
+    GodotVersion, RUNNER_SCHEMA_VERSION, RunnerDiagnostic, RunnerOperation, RunnerRequest,
+    RunnerResponse,
+};
 
-use super::output::localize_output;
-use crate::source::compile_source;
+use super::{output::localize_output, source::localize_source};
 
 /// Godot runtime selection shared by the Godot subcommands.
 #[derive(Debug, Args)]
@@ -39,54 +40,102 @@ pub(crate) struct RuntimeOptions {
     timeout: u64,
 }
 
+/// Failure of a project-aware Godot operation.
+#[derive(Debug)]
+pub(crate) enum RunError {
+    /// The runner reported structured diagnostics.
+    Diagnostics(Vec<RunnerDiagnostic>),
+    /// No usable runner response was produced.
+    Message(String),
+}
+
+impl fmt::Display for RunError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Diagnostics(diagnostics) => {
+                let rendered = diagnostics
+                    .iter()
+                    .map(RunnerDiagnostic::render)
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                formatter.write_str(&rendered)
+            }
+            Self::Message(message) => formatter.write_str(message),
+        }
+    }
+}
+
 impl RuntimeOptions {
     /// Compiles and maps a theme root without writing an artifact.
-    pub(crate) fn check(&self, root: &Path) -> Result<String, String> {
-        let plan = self.plan(root)?;
-        let project = self.project_root(root)?;
-        self.run(&project, &plan, "check", None)
+    pub(crate) fn check(&self, root: &Path) -> Result<GodotVersion, RunError> {
+        self.execute(root, RunnerOperation::Check, None)
+            .map(|(version, _)| version)
     }
 
     /// Compiles a theme root and writes its native theme, returning the output path.
-    pub(crate) fn build(&self, root: &Path, output: &Path) -> Result<String, String> {
-        let plan = self.plan(root)?;
-        let project = self.project_root(root)?;
-        let output = localize_output(&project, output)?;
-        self.run(&project, &plan, "build", Some(&output))
+    pub(crate) fn build(
+        &self,
+        root: &Path,
+        output: &Path,
+    ) -> Result<(GodotVersion, String), RunError> {
+        self.execute(root, RunnerOperation::Build, Some(output))
+            .and_then(|(version, output)| {
+                output
+                    .map(|output| (version, output))
+                    .ok_or_else(|| RunError::Message("runner reported no output path".to_owned()))
+            })
     }
 
-    /// Compiles a theme root into a portable Godot build plan.
-    fn plan(&self, root: &Path) -> Result<GodotBuildPlan, String> {
-        let theme = compile_source(root)?;
-        themosis_godot::plan_theme(&theme).map_err(|error| error.to_string())
+    fn execute(
+        &self,
+        root: &Path,
+        operation: RunnerOperation,
+        output: Option<&Path>,
+    ) -> Result<(GodotVersion, Option<String>), RunError> {
+        let project = self.project_root(root).map_err(RunError::Message)?;
+        let source = localize_source(&project, root).map_err(RunError::Message)?;
+        let output = match output {
+            Some(output) => Some(localize_output(&project, output).map_err(RunError::Message)?),
+            None => None,
+        };
+        require_addon(&project)?;
+        let request = RunnerRequest {
+            schema_version: RUNNER_SCHEMA_VERSION,
+            operation,
+            source,
+            output,
+            required_godot_version: self.require_version.clone(),
+        };
+        self.run(&project, &request)
+            .map(|response| (response.godot_version, response.output))
     }
 
     fn project_root(&self, root: &Path) -> Result<PathBuf, String> {
         if let Some(project) = &self.project {
             return validate_project(project);
         }
-        let canonical = root
-            .canonicalize()
-            .map_err(|error| format!("cannot open '{}': {error}", root.display()))?;
-        for ancestor in canonical.ancestors().skip(1) {
-            if ancestor.join("project.godot").is_file() {
-                return Ok(ancestor.to_path_buf());
-            }
+        if !root.to_string_lossy().starts_with("res://")
+            && let Ok(canonical) = root.canonicalize()
+            && let Some(ancestor) = canonical
+                .ancestors()
+                .skip(1)
+                .find(|ancestor| ancestor.join("project.godot").is_file())
+        {
+            return validate_project(ancestor);
+        }
+        let current = env::current_dir()
+            .map_err(|error| format!("cannot resolve current directory: {error}"))?;
+        if current.join("project.godot").is_file() {
+            return validate_project(&current);
         }
         Err(format!(
-            "cannot find project.godot above '{}'; pass --project DIR",
+            "cannot find project.godot above '{}' or in the current directory; pass --project DIR",
             root.display()
         ))
     }
 
-    fn run(
-        &self,
-        project: &Path,
-        plan: &GodotBuildPlan,
-        operation: &str,
-        output: Option<&str>,
-    ) -> Result<String, String> {
-        let files = RunnerFiles::create(plan, operation, output, self.require_version.as_deref())?;
+    fn run(&self, project: &Path, request: &RunnerRequest) -> Result<RunnerResponse, RunError> {
+        let files = RunnerFiles::create(request).map_err(RunError::Message)?;
         let mut last_missing = None;
         for executable in self.executables() {
             match run_godot(
@@ -100,10 +149,10 @@ impl RuntimeOptions {
                     last_missing = Some(executable);
                 }
                 Err(error) => {
-                    return Err(format!(
+                    return Err(RunError::Message(format!(
                         "cannot start Godot executable '{}': {error}",
                         executable.display()
-                    ));
+                    )));
                 }
             }
         }
@@ -111,9 +160,9 @@ impl RuntimeOptions {
             || "configured executable".to_owned(),
             |path| format!("'{}'", path.display()),
         );
-        Err(format!(
+        Err(RunError::Message(format!(
             "cannot find Godot executable {attempted}; pass --godot FILE or set THEMOSIS_GODOT_BINARY"
-        ))
+        )))
     }
 
     fn executables(&self) -> Vec<PathBuf> {
@@ -131,8 +180,7 @@ impl RuntimeOptions {
 
 struct RunnerFiles {
     _directory: TempDir,
-    builder: PathBuf,
-    script: PathBuf,
+    scene: PathBuf,
     request: PathBuf,
     response: PathBuf,
     log: PathBuf,
@@ -141,19 +189,13 @@ struct RunnerFiles {
 }
 
 impl RunnerFiles {
-    fn create(
-        plan: &GodotBuildPlan,
-        operation: &str,
-        output: Option<&str>,
-        required_version: Option<&str>,
-    ) -> Result<Self, String> {
+    fn create(request: &RunnerRequest) -> Result<Self, String> {
         let directory = TempDirBuilder::new()
             .prefix("themosis-godot-")
             .tempdir()
             .map_err(|error| format!("cannot create temporary Godot runner: {error}"))?;
         let files = Self {
-            builder: directory.path().join("native_theme_builder.gd"),
-            script: directory.path().join("native_theme_runner.gd"),
+            scene: directory.path().join("runner.tscn"),
             request: directory.path().join("request.json"),
             response: directory.path().join("response.json"),
             log: directory.path().join("godot.log"),
@@ -161,28 +203,14 @@ impl RunnerFiles {
             stderr: directory.path().join("stderr.log"),
             _directory: directory,
         };
-        fs::write(&files.builder, NATIVE_THEME_BUILDER_GDSCRIPT).map_err(|error| {
-            format!(
-                "cannot write native Godot builder '{}': {error}",
-                files.builder.display()
-            )
-        })?;
-        fs::write(&files.script, NATIVE_THEME_RUNNER_GDSCRIPT).map_err(|error| {
-            format!(
-                "cannot write native Godot runner '{}': {error}",
-                files.script.display()
-            )
-        })?;
-        let request = json!({
-            "operation": operation,
-            "output": output,
-            "required_godot_version": required_version,
-            "plan": plan,
-        });
-        let mut request = serde_json::to_string_pretty(&request)
-            .expect("Godot runner requests contain serializable values");
-        request.push('\n');
-        fs::write(&files.request, request).map_err(|error| {
+        // SceneTree requires a scene even for a custom main loop. Always supply
+        // an inert one so asset compilation never starts the application's scene.
+        fs::write(
+            &files.scene,
+            "[gd_scene format=3]\n[node name=\"Runner\" type=\"Node\"]\n",
+        )
+        .map_err(|error| format!("cannot write runner scene: {error}"))?;
+        fs::write(&files.request, request.to_json()).map_err(|error| {
             format!(
                 "cannot write Godot request '{}': {error}",
                 files.request.display()
@@ -212,8 +240,8 @@ fn run_godot(
         .arg(project)
         .arg("--log-file")
         .arg(&files.log)
-        .arg("--script")
-        .arg(&files.script)
+        .args(["--main-loop", "ThemosisCliRunner"])
+        .arg(&files.scene)
         .arg("--")
         .arg(&files.request)
         .arg(&files.response)
@@ -249,91 +277,42 @@ fn run_godot(
     })
 }
 
-fn parse_response(process: ProcessOutput, files: &RunnerFiles) -> Result<String, String> {
+fn parse_response(process: ProcessOutput, files: &RunnerFiles) -> Result<RunnerResponse, RunError> {
     if process.timed_out {
-        return Err(format!(
-            "Godot target operation timed out\n{}",
+        return Err(RunError::Message(format!(
+            "Godot runner timed out\n{}",
             process_details(&process, files)
-        ));
+        )));
     }
-    let response = fs::read_to_string(&files.response).map_err(|error| {
-        format!(
-            "Godot did not return a build response: {error}\n{}",
-            process_details(&process, files)
-        )
-    })?;
-    let response: Value = serde_json::from_str(&response).map_err(|error| {
-        format!(
-            "Godot returned an invalid build response: {error}\n{}",
-            process_details(&process, files)
-        )
-    })?;
-    if response.get("ok").and_then(Value::as_bool) == Some(true) && process.status.success() {
-        return version_label(&response)
-            .ok_or_else(|| "Godot response did not identify its runtime version".to_owned());
-    }
-    let diagnostics = response
-        .get("diagnostics")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .map(format_diagnostic)
-        .collect::<Vec<_>>();
-    if diagnostics.is_empty() {
-        Err(format!(
-            "Godot target operation failed with {}\n{}",
-            process.status,
+    let text = fs::read_to_string(&files.response).map_err(|error| {
+        RunError::Message(format!(
+            "Godot did not produce a runner response ({error}); ensure a compatible Themosis addon is installed and built for this Godot version\n{}",
             process_details(&process, files)
         ))
-    } else {
-        Err(diagnostics.join("\n"))
-    }
-}
-
-fn version_label(response: &Value) -> Option<String> {
-    let version = response.get("godot_version")?;
-    if let Some(version) = version.as_str() {
-        return Some(version.to_owned());
-    }
-    let display = version.get("display")?.as_str()?;
-    let hash = version
-        .get("hash")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    if hash.is_empty() {
-        Some(display.to_owned())
-    } else {
-        Some(format!(
-            "{display} [{}]",
-            hash.chars().take(9).collect::<String>()
+    })?;
+    let response = RunnerResponse::from_json(&text).map_err(|error| {
+        RunError::Message(format!(
+            "Godot returned an invalid runner response: {error}\n{}",
+            process_details(&process, files)
         ))
+    })?;
+    if response.schema_version != RUNNER_SCHEMA_VERSION {
+        return Err(RunError::Message(format!(
+            "Themosis addon uses runner protocol version {}, but this CLI expects {}; reinstall a matching addon",
+            response.schema_version, RUNNER_SCHEMA_VERSION
+        )));
     }
-}
-
-fn format_diagnostic(diagnostic: &Value) -> String {
-    let message = diagnostic
-        .get("message")
-        .and_then(Value::as_str)
-        .unwrap_or("Godot target operation failed");
-    let code = diagnostic
-        .get("code")
-        .and_then(Value::as_str)
-        .unwrap_or("godot_error");
-    let context = ["style", "target", "state", "property"]
-        .into_iter()
-        .filter_map(|field| {
-            diagnostic
-                .get(field)
-                .and_then(Value::as_str)
-                .filter(|value| !value.is_empty())
-                .map(|value| format!("{field}={value}"))
-        })
-        .collect::<Vec<_>>();
-    if context.is_empty() {
-        format!("[{code}] {message}")
-    } else {
-        format!("[{code} {}] {message}", context.join(" "))
+    if response.ok && process.status.success() {
+        return Ok(response);
     }
+    if !response.diagnostics.is_empty() {
+        return Err(RunError::Diagnostics(response.diagnostics));
+    }
+    Err(RunError::Message(format!(
+        "Godot runner failed with {}\n{}",
+        process.status,
+        process_details(&process, files)
+    )))
 }
 
 fn process_details(process: &ProcessOutput, files: &RunnerFiles) -> String {
@@ -344,6 +323,38 @@ fn process_details(process: &ProcessOutput, files: &RunnerFiles) -> String {
         process.stderr.trim(),
         log.trim()
     )
+}
+
+/// Requires the Themosis GDExtension and a project Godot has already imported.
+///
+/// Godot only loads GDExtensions listed in `.godot/extension_list.cfg`, which the
+/// editor writes during import. Without that registration `--main-loop` falls
+/// back to an empty SceneTree, so both a missing manifest and an unimported
+/// project are reported before the engine starts instead of hitting the timeout.
+fn require_addon(project: &Path) -> Result<(), RunError> {
+    let manifest = [
+        "themosis.gdextension",
+        "addons/themosis/themosis.gdextension",
+    ]
+    .into_iter()
+    .map(|relative| project.join(relative))
+    .find(|candidate| candidate.is_file());
+    if manifest.is_none() {
+        return Err(RunError::Message(format!(
+            "Godot project '{}' has no Themosis addon; install it under res://addons/themosis or add themosis.gdextension",
+            project.display()
+        )));
+    }
+    let registered = fs::read_to_string(project.join(".godot/extension_list.cfg"))
+        .is_ok_and(|text| text.contains("themosis.gdextension"));
+    if !registered {
+        return Err(RunError::Message(format!(
+            "Godot project '{}' has not registered the Themosis addon; import it first with `godot --headless --editor --import --path {}`",
+            project.display(),
+            project.display()
+        )));
+    }
+    Ok(())
 }
 
 fn validate_project(project: &Path) -> Result<PathBuf, String> {

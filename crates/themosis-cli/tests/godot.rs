@@ -1,36 +1,41 @@
-//! Process-level tests for Godot validation and generation.
+//! Process-level tests for project-aware Godot validation and generation.
 
 #![cfg(feature = "godot")]
 
-use std::{path::Path, process::Command};
+use std::{
+    path::{Path, PathBuf},
+    process::{Command, Output},
+};
 
-use serde_json::{Value, json};
 use tempfile::{Builder as TempDirBuilder, TempDir};
-use themosis_godot::{NATIVE_THEME_BUILDER_GDSCRIPT, NATIVE_THEME_RUNNER_GDSCRIPT};
+
+/// Token fixture shared by the generated themes.
+const TOKENS: &str = r#"{
+    "background": {
+        "$type": "color",
+        "$value": { "colorSpace": "srgb", "components": [0.1, 0.2, 0.3], "alpha": 1.0 }
+    },
+    "font-size": {
+        "$type": "dimension",
+        "$value": { "value": 17, "unit": "px" }
+    }
+}"#;
 
 fn command() -> Command {
     Command::new(env!("CARGO_BIN_EXE_themosis"))
 }
 
-#[test]
-fn missing_godot_project_directory_is_rejected() {
-    let project = TestProject::new();
-    let missing_project = project.path().join("missing-project");
+/// Turns missing prerequisites into failures; set by the Godot CI job.
+const REQUIRE_ENV: &str = "THEMOSIS_REQUIRE_GODOT";
 
-    let output = project
-        .command_for_project(
-            "check",
-            "missing-godot-for-project-validation",
-            &missing_project,
-        )
-        .arg(project.root())
-        .output()
-        .expect("CLI starts");
-
-    assert_eq!(output.status.code(), Some(1));
-    let stderr = String::from_utf8(output.stderr).expect("stderr is UTF-8");
-    assert!(stderr.contains("cannot open Godot project directory"));
-    assert!(stderr.contains("missing-project"));
+/// Reports a missing prerequisite, failing when the environment requires the
+/// suite to run.
+fn skip(prerequisite: &str, hint: &str) {
+    assert!(
+        !std::env::var_os(REQUIRE_ENV).is_some_and(|value| value != "0"),
+        "required for this run, but missing: {prerequisite}; {hint}"
+    );
+    eprintln!("skipping runtime-backed CLI test: {prerequisite} is missing; {hint}");
 }
 
 fn godot() -> Option<String> {
@@ -42,8 +47,41 @@ fn godot() -> Option<String> {
             return Some(executable.to_owned());
         }
     }
-    eprintln!("skipping runtime-backed CLI test: Godot is not installed");
+    skip("Godot", "install Godot 4.5+ or set THEMOSIS_GODOT_BINARY");
     None
+}
+
+/// Locates the GDExtension library the runtime tests load.
+///
+/// `THEMOSIS_GODOT_LIBRARY` pins the artifact built for these tests; without it
+/// the path is derived from this build's profile.
+fn built_plugin_library() -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os("THEMOSIS_GODOT_LIBRARY") {
+        let path = PathBuf::from(path);
+        assert!(
+            path.is_file(),
+            "THEMOSIS_GODOT_LIBRARY is not a file: {}",
+            path.display()
+        );
+        return Some(path);
+    }
+    let profile = option_env!("PROFILE").unwrap_or("debug");
+    let name = format!(
+        "{}themosis_godot_plugin{}",
+        std::env::consts::DLL_PREFIX,
+        std::env::consts::DLL_SUFFIX
+    );
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../target")
+        .join(profile)
+        .join("deps")
+        .join(name);
+    path.is_file().then_some(path)
+}
+
+/// Path of the maintained probe project that loads the GDExtension.
+fn probe_project() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../crates/themosis-godot-plugin/tests/godot")
 }
 
 struct TestProject {
@@ -51,7 +89,8 @@ struct TestProject {
 }
 
 impl TestProject {
-    fn new() -> Self {
+    /// Creates an empty project without the Themosis addon.
+    fn minimal() -> Self {
         let directory = TempDirBuilder::new()
             .prefix("themosis-cli-test-")
             .tempdir()
@@ -61,23 +100,48 @@ impl TestProject {
             "[application]\nconfig/name=\"Themosis CLI test\"\n",
         )
         .expect("Godot project is written");
-        std::fs::write(
-            directory.path().join("tokens.json"),
-            r#"{
-                "background": {
-                    "$type": "color",
-                    "$value": { "colorSpace": "srgb", "components": [0.1, 0.2, 0.3], "alpha": 1.0 }
-                },
-                "font-size": {
-                    "$type": "dimension",
-                    "$value": { "value": 17, "unit": "px" }
-                }
-            }"#,
-        )
-        .expect("token fixture is written");
+        std::fs::write(directory.path().join("tokens.json"), TOKENS)
+            .expect("token fixture is written");
         let project = Self { directory };
         project.write_theme("Button", "normal");
         project
+    }
+
+    /// Creates a temporary copy of the probe project wired to the built
+    /// extension library.
+    ///
+    /// The project is registered by construction: the manifest and
+    /// `.godot/extension_list.cfg` are written directly, so the addon is
+    /// discoverable without an editor import pass.
+    fn with_extension() -> Option<Self> {
+        let library = built_plugin_library().or_else(|| {
+            skip(
+                "the GDExtension library",
+                "run `just test-godot` to build it",
+            );
+            None
+        })?;
+        let directory = TempDirBuilder::new()
+            .prefix("themosis-cli-test-")
+            .tempdir()
+            .expect("isolated Godot project is created");
+        for file in ["project.godot", "main.tscn"] {
+            std::fs::copy(probe_project().join(file), directory.path().join(file))
+                .unwrap_or_else(|error| panic!("probe file '{file}' is copied: {error}"));
+        }
+        let project = Self { directory };
+        project.write_manifest(&library);
+        std::fs::create_dir_all(project.path().join(".godot"))
+            .expect("Godot metadata directory is created");
+        std::fs::write(
+            project.path().join(".godot/extension_list.cfg"),
+            "res://themosis.gdextension\n",
+        )
+        .expect("extension registration is written");
+        std::fs::write(project.path().join("tokens.json"), TOKENS)
+            .expect("token fixture is written");
+        project.write_theme("Button", "normal");
+        Some(project)
     }
 
     fn path(&self) -> &Path {
@@ -90,340 +154,102 @@ impl TestProject {
         path
     }
 
-    fn root(&self) -> std::path::PathBuf {
+    fn root(&self) -> PathBuf {
         self.path().join("theme.kdl")
     }
 
-    fn output(&self) -> std::path::PathBuf {
+    fn output(&self) -> PathBuf {
         self.path().join("generated/theme.tres")
+    }
+
+    fn write_manifest(&self, library: &Path) {
+        let library = library
+            .to_str()
+            .expect("extension library path is UTF-8")
+            .to_owned();
+        let mut libraries = String::new();
+        for key in [
+            "macos.debug",
+            "macos.debug.arm64",
+            "macos.debug.x86_64",
+            "linux.debug.x86_64",
+            "linux.debug.arm64",
+            "windows.debug.x86_64",
+            "windows.debug.arm64",
+        ] {
+            libraries.push_str(&format!("{key} = \"{library}\"\n"));
+        }
+        std::fs::write(
+            self.path().join("themosis.gdextension"),
+            format!(
+                "[configuration]\nentry_symbol = \"gdext_rust_init\"\ncompatibility_minimum = 4.5\nreloadable = true\n\n[libraries]\n{libraries}"
+            ),
+        )
+        .expect("extension manifest is written");
+    }
+
+    /// Writes a manifest and extension registration without a real library.
+    fn write_stub_addon(&self) {
+        self.write_manifest(Path::new("stub.gdextension"));
+        std::fs::create_dir_all(self.path().join(".godot")).expect("import directory is created");
+        std::fs::write(
+            self.path().join(".godot/extension_list.cfg"),
+            "res://themosis.gdextension\n",
+        )
+        .expect("stub extension registration is written");
     }
 
     fn write_theme(&self, target: &str, property: &str) {
         std::fs::write(
             self.root(),
             format!(
-                r#"theme RuntimeBuild {{
-                    tokens "tokens.json"
-                    style Probe target="{target}" {{
-                        token {property} "background"
-                        token font_size "font-size"
-                    }}
-                }}"#,
+                "theme RuntimeBuild {{\n    tokens \"tokens.json\"\n    style Probe target=\"{target}\" {{\n        token {property} \"background\"\n        token font_size \"font-size\"\n    }}\n}}\n",
             ),
         )
         .expect("theme fixture is written");
     }
 
-    fn command(&self, command_name: &str, godot: &str) -> Command {
-        self.command_for_project(command_name, godot, self.path())
-    }
-
-    fn command_for_project(&self, command_name: &str, godot: &str, project: &Path) -> Command {
-        let mut command = command();
-        command.args([
-            "godot",
-            command_name,
-            "--godot",
-            godot,
-            "--project",
-            project.to_str().expect("project path is UTF-8"),
-        ]);
-        command
-    }
-
-    fn check_command(&self, godot: &str) -> Command {
-        let mut command = self.command("check", godot);
-        command.arg(self.root());
-        command
-    }
-
-    fn build_command(&self, godot: &str, output: &Path) -> Command {
-        let mut command = self.command("build", godot);
-        command
-            .args(["--output", output.to_str().expect("output path is UTF-8")])
-            .arg(self.root());
-        command
-    }
-}
-
-fn build(project: &TestProject, godot: &str) -> std::process::Output {
-    let output = project.output();
-    project
-        .build_command(godot, &output)
-        .output()
-        .expect("CLI starts")
-}
-
-fn assert_generated_theme_loads(project: &TestProject, godot: &str) {
-    std::fs::write(
-        project.path().join("verify_theme.gd"),
-        r#"
-extends SceneTree
-func _initialize() -> void:
-    var generated := ResourceLoader.load("res://generated/theme.tres") as Theme
-    if generated == null:
-        quit(1)
-        return
-    var normal := generated.get_stylebox("normal", "Probe") as StyleBoxFlat
-    if generated.get_font_size("font_size", "Probe") != 17 or normal == null:
-        quit(1)
-        return
-    quit()
-"#,
-    )
-    .expect("theme verification script is written");
-    let output = Command::new(godot)
-        .args(["--headless", "--path"])
-        .arg(project.path())
-        .arg("--log-file")
-        .arg(project.path().join("verify-theme.log"))
-        .args(["--script", "res://verify_theme.gd"])
-        .output()
-        .expect("Godot starts");
-    assert!(
-        output.status.success(),
-        "Godot could not load the generated theme:\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr),
-    );
-}
-
-fn run_native_builder(project: &TestProject, godot: &str, request: &Value) -> Value {
-    let runner = TempDirBuilder::new()
-        .prefix("themosis-native-builder-test-")
-        .tempdir()
-        .expect("native builder directory is created");
-    let script = runner.path().join("native_theme_builder.gd");
-    let entrypoint = runner.path().join("native_theme_runner.gd");
-    let request_path = runner.path().join("request.json");
-    let response_path = runner.path().join("response.json");
-    std::fs::write(&script, NATIVE_THEME_BUILDER_GDSCRIPT).expect("native builder is written");
-    std::fs::write(&entrypoint, NATIVE_THEME_RUNNER_GDSCRIPT).expect("native runner is written");
-    std::fs::write(
-        &request_path,
-        serde_json::to_vec_pretty(request).expect("request is serializable"),
-    )
-    .expect("native builder request is written");
-
-    let output = Command::new(godot)
-        .args(["--headless", "--path"])
-        .arg(project.path())
-        .arg("--log-file")
-        .arg(runner.path().join("godot.log"))
-        .arg("--script")
-        .arg(&entrypoint)
-        .arg("--")
-        .arg(&request_path)
-        .arg(&response_path)
-        .output()
-        .expect("Godot starts");
-    assert!(
-        !output.status.success(),
-        "malformed request unexpectedly succeeded: {}",
-        String::from_utf8_lossy(&output.stderr),
-    );
-    serde_json::from_slice(
-        &std::fs::read(response_path).expect("native builder response is written"),
-    )
-    .expect("native builder response is JSON")
-}
-
-#[test]
-#[ignore = "not added"]
-fn check_can_apply_portable_godot_backend_validation() {
-    let Some(godot) = godot() else {
-        return;
-    };
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/godot/theme/light.tms");
-
-    let output = command()
-        .args([
-            "godot",
-            "check",
-            "--godot",
-            &godot,
-            root.to_str().expect("fixture path is UTF-8"),
-        ])
-        .output()
-        .expect("CLI starts");
-
-    assert!(output.status.success());
-    let stdout = String::from_utf8(output.stdout).expect("stdout is UTF-8");
-    assert!(
-        stdout.starts_with(
-            "theme 'Application' sources and Godot mappings validate successfully with "
+    fn write_resource_theme(&self, target: &str, property: &str, reference: &str) {
+        std::fs::write(
+            self.root(),
+            format!(
+                "theme RuntimeBuild {{\n    tokens \"tokens.json\"\n    style Probe target=\"{target}\" {{\n        resource {property} \"{reference}\"\n    }}\n}}\n",
+            ),
         )
-    );
-    assert!(output.stderr.is_empty());
+        .expect("resource theme fixture is written");
+    }
+
+    fn godot_command(&self, action: &str, godot: &str) -> Command {
+        let mut command = command();
+        command.args(["godot", action, "--godot", godot, "--project"]);
+        command.arg(self.path());
+        command
+    }
+
+    fn check(&self, godot: &str) -> Output {
+        self.godot_command("check", godot)
+            .arg(self.root())
+            .output()
+            .expect("CLI starts")
+    }
+
+    fn build(&self, godot: &str, output: &Path) -> Output {
+        self.godot_command("build", godot)
+            .args(["--output"])
+            .arg(output)
+            .arg(self.root())
+            .output()
+            .expect("CLI starts")
+    }
 }
 
-#[test]
-fn build_generates_a_godot_theme_file() {
-    let Some(godot) = godot() else {
-        return;
-    };
-    let project = TestProject::new();
-
-    let output = build(&project, &godot);
-
-    assert!(
-        output.status.success(),
-        "generation failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let source = std::fs::read_to_string(project.output()).expect("theme file was generated");
-    assert!(source.starts_with("[gd_resource type=\"Theme\""));
-    assert!(source.contains("Probe/base_type = &\"Button\""));
-    assert!(source.contains("Probe/styles/normal = SubResource("));
-    assert!(source.contains("Probe/font_sizes/font_size = 17"));
-
-    let replacement = build(&project, &godot);
-    assert!(replacement.status.success());
-    assert_generated_theme_loads(&project, &godot);
-}
-
-#[test]
-fn runtime_mapping_failure_is_structured_and_preserves_output() {
-    let Some(godot) = godot() else {
-        return;
-    };
-    let project = TestProject::new();
-    let generated = build(&project, &godot);
-    assert!(generated.status.success());
-    let previous = std::fs::read_to_string(project.output()).expect("theme file was generated");
-    project.write_theme("Button", "not_a_theme_item");
-
-    let failed = build(&project, &godot);
-
-    assert!(!failed.status.success());
-    let stderr = String::from_utf8(failed.stderr).expect("stderr is UTF-8");
-    assert!(
-        stderr
-            .contains("[unsupported_property style=Probe target=Button property=not_a_theme_item]")
-    );
-    assert_eq!(
-        std::fs::read_to_string(project.output()).expect("previous output remains readable"),
-        previous,
-    );
-}
-
-#[test]
-fn unknown_runtime_target_reports_structured_context() {
-    let Some(godot) = godot() else {
-        return;
-    };
-    let project = TestProject::new();
-    project.write_theme("NotAGodotControl", "normal");
-
-    let output = project.check_command(&godot).output().expect("CLI starts");
-
-    assert!(!output.status.success());
-    let stderr = String::from_utf8(output.stderr).expect("stderr is UTF-8");
-    assert!(stderr.contains("[unknown_target style=Probe target=NotAGodotControl]"));
-}
-
-#[test]
-fn color_rejects_a_non_flat_default_stylebox() {
-    let Some(godot) = godot() else {
-        return;
-    };
-    let project = TestProject::new();
-    project.write_theme("HSeparator", "separator");
-
-    let output = project.check_command(&godot).output().expect("CLI starts");
-
-    assert!(!output.status.success());
-    let stderr = String::from_utf8(output.stderr).expect("stderr is UTF-8");
-    assert!(
-        stderr.contains("[incompatible_stylebox style=Probe target=HSeparator property=separator]")
-    );
-    assert!(stderr.contains("a color can only modify StyleBoxFlat"));
-}
-
-#[test]
-fn native_builder_rejects_malformed_candidate_and_integer_data() {
-    let Some(godot) = godot() else {
-        return;
-    };
-    let project = TestProject::new();
-    let response = run_native_builder(
-        &project,
-        &godot,
-        &json!({
-            "operation": "check",
-            "required_godot_version": null,
-            "plan": {
-                "schema_version": 2,
-                "theme": "Malformed",
-                "styles": [{
-                    "name": "Probe",
-                    "target": "Button",
-                    "items": [
-                        {
-                            "property": "normal",
-                            "state": null,
-                            "value_kind": "color",
-                            "candidates": ["not_a_category"],
-                            "value": {"kind": "color", "rgba": [0.1, 0.2, 0.3, 1.0]}
-                        },
-                        {
-                            "property": "font_size",
-                            "state": null,
-                            "value_kind": "dimension",
-                            "candidates": ["font_size"],
-                            "value": {"kind": "integer"}
-                        }
-                    ]
-                }]
-            }
-        }),
-    );
-
-    assert_eq!(response["ok"], false);
-    assert!(response["godot_version"].is_object());
-    let diagnostics = response["diagnostics"]
-        .as_array()
-        .expect("diagnostics are an array");
-    assert_eq!(diagnostics.len(), 2);
-    assert_eq!(diagnostics[0]["code"], "invalid_plan");
-    assert_eq!(diagnostics[0]["style"], "Probe");
-    assert_eq!(diagnostics[0]["target"], "Button");
-    assert_eq!(diagnostics[0]["property"], "normal");
-    assert_eq!(diagnostics[1]["code"], "invalid_integer");
-    assert_eq!(diagnostics[1]["property"], "font_size");
-}
-
-#[test]
-fn exact_version_mismatch_preserves_existing_output() {
-    let Some(godot) = godot() else {
-        return;
-    };
-    let project = TestProject::new();
-    std::fs::create_dir(project.output().parent().expect("output has a parent"))
-        .expect("output directory is created");
-    let previous = "previous theme output\n";
-    std::fs::write(project.output(), previous).expect("previous output is written");
-
-    let output = project
-        .command("build", &godot)
-        .args(["--require-version", "0.0.0", "--output"])
-        .arg(project.output())
-        .arg(project.root())
-        .output()
-        .expect("CLI starts");
-
-    assert!(!output.status.success());
-    let stderr = String::from_utf8(output.stderr).expect("stderr is UTF-8");
-    assert!(stderr.contains("[godot_version_mismatch] required Godot 0.0.0, got"));
-    assert_eq!(
-        std::fs::read_to_string(project.output()).expect("previous output remains readable"),
-        previous,
-    );
+fn stderr(output: &Output) -> String {
+    String::from_utf8(output.stderr.clone()).expect("stderr is UTF-8")
 }
 
 #[test]
 fn output_escape_is_rejected_without_creating_directories() {
-    let project = TestProject::new();
+    let project = TestProject::minimal();
     let outside = TempDirBuilder::new()
         .prefix("themosis-cli-outside-")
         .tempdir()
@@ -431,15 +257,14 @@ fn output_escape_is_rejected_without_creating_directories() {
     let output = outside.path().join("new/directory/theme.tres");
 
     let result = project
-        .command("build", "missing-godot-for-output-validation")
+        .godot_command("build", "missing-godot-for-output-validation")
         .args(["--output", output.to_str().expect("output path is UTF-8")])
         .arg(project.root())
         .output()
         .expect("CLI starts");
 
     assert!(!result.status.success());
-    let stderr = String::from_utf8(result.stderr).expect("stderr is UTF-8");
-    assert!(stderr.contains("escapes project"));
+    assert!(stderr(&result).contains("escapes project"));
     assert!(!outside.path().join("new").exists());
 }
 
@@ -448,7 +273,7 @@ fn output_escape_is_rejected_without_creating_directories() {
 fn output_parent_symlink_escape_is_rejected_by_the_command() {
     use std::os::unix::fs::symlink;
 
-    let project = TestProject::new();
+    let project = TestProject::minimal();
     let outside = TempDirBuilder::new()
         .prefix("themosis-cli-outside-")
         .tempdir()
@@ -456,16 +281,65 @@ fn output_parent_symlink_escape_is_rejected_by_the_command() {
     symlink(outside.path(), project.path().join("linked")).expect("escape symlink is created");
 
     let result = project
-        .command("build", "missing-godot-for-output-validation")
+        .godot_command("build", "missing-godot-for-output-validation")
         .args(["--output", "res://linked/theme.tres"])
         .arg(project.root())
         .output()
         .expect("CLI starts");
 
     assert!(!result.status.success());
-    let stderr = String::from_utf8(result.stderr).expect("stderr is UTF-8");
-    assert!(stderr.contains("escapes project"));
+    assert!(stderr(&result).contains("escapes project"));
     assert!(!outside.path().join("theme.tres").exists());
+}
+
+#[test]
+fn missing_project_directory_is_rejected() {
+    let project = TestProject::minimal();
+    let missing = project.path().join("missing-project");
+
+    let result = command()
+        .args([
+            "godot",
+            "check",
+            "--godot",
+            "missing-godot-for-project-validation",
+            "--project",
+        ])
+        .arg(&missing)
+        .arg(project.root())
+        .output()
+        .expect("CLI starts");
+
+    assert!(!result.status.success());
+    let message = stderr(&result);
+    assert!(message.contains("cannot open Godot project directory"));
+    assert!(message.contains("missing-project"));
+}
+
+#[test]
+fn missing_addon_reports_an_actionable_error() {
+    let project = TestProject::minimal();
+
+    let output = project.check("missing-godot-for-addon-validation");
+
+    assert!(!output.status.success());
+    let message = stderr(&output);
+    assert!(message.contains("has no Themosis addon"));
+    assert!(message.contains("res://addons/themosis"));
+}
+
+#[test]
+fn unimported_project_reports_an_actionable_error() {
+    let project = TestProject::minimal();
+    // The addon is installed but Godot has not imported the project yet.
+    project.write_manifest(Path::new("stub.gdextension"));
+
+    let output = project.check("missing-godot-for-import-validation");
+
+    assert!(!output.status.success());
+    let message = stderr(&output);
+    assert!(message.contains("has not registered the Themosis addon"));
+    assert!(message.contains("--editor --import"));
 }
 
 #[cfg(unix)]
@@ -473,7 +347,8 @@ fn output_parent_symlink_escape_is_rejected_by_the_command() {
 fn godot_timeout_stops_a_stalled_runtime() {
     use std::{os::unix::fs::PermissionsExt as _, time::Instant};
 
-    let project = TestProject::new();
+    let project = TestProject::minimal();
+    project.write_stub_addon();
     let executable = project.path().join("stalled-godot");
     std::fs::write(&executable, "#!/bin/sh\nexec sleep 5\n").expect("fake Godot is written");
     let mut permissions = std::fs::metadata(&executable)
@@ -483,21 +358,379 @@ fn godot_timeout_stops_a_stalled_runtime() {
     std::fs::set_permissions(&executable, permissions).expect("fake Godot is executable");
 
     let started = Instant::now();
-    let output = project
-        .command(
-            "check",
-            executable.to_str().expect("executable path is UTF-8"),
-        )
+    let result = project
+        .godot_command("check", executable.to_str().expect("path is UTF-8"))
         .args(["--timeout", "1"])
         .arg(project.root())
         .output()
         .expect("CLI starts");
 
-    assert!(!output.status.success());
+    assert!(!result.status.success());
     assert!(started.elapsed().as_secs() < 4);
-    let stderr = String::from_utf8(output.stderr).expect("stderr is UTF-8");
-    assert!(stderr.contains("Godot target operation timed out"));
-    assert!(stderr.contains("stdout:\n"));
-    assert!(stderr.contains("stderr:\n"));
-    assert!(stderr.contains("Godot log:\n"));
+    let message = stderr(&result);
+    assert!(message.contains("Godot runner timed out"));
+    assert!(message.contains("Godot log:"));
+}
+
+#[cfg(unix)]
+#[test]
+fn protocol_mismatch_is_rejected() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let project = TestProject::minimal();
+    project.write_stub_addon();
+    let executable = project.path().join("fake-godot");
+    std::fs::write(
+        &executable,
+        r#"#!/bin/sh
+resp=""
+for arg in "$@"; do resp="$arg"; done
+printf '%s' '{"schema_version":999,"ok":true,"godot_version":{"display":"fake","major":9,"minor":9,"patch":9,"status":"","build":"","hash":""}}' > "$resp"
+exit 0
+"#,
+    )
+    .expect("fake Godot is written");
+    let mut permissions = std::fs::metadata(&executable)
+        .expect("fake Godot metadata is readable")
+        .permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&executable, permissions).expect("fake Godot is executable");
+
+    let result = project
+        .godot_command("check", executable.to_str().expect("path is UTF-8"))
+        .arg(project.root())
+        .output()
+        .expect("CLI starts");
+
+    assert!(!result.status.success());
+    assert!(stderr(&result).contains("runner protocol version 999"));
+}
+
+#[test]
+fn check_validates_a_project_theme_by_inference() {
+    let Some(godot) = godot() else {
+        return;
+    };
+    let Some(project) = TestProject::with_extension() else {
+        return;
+    };
+
+    // No --project: the project is inferred from the source's ancestors.
+    let output = command()
+        .args(["godot", "check", "--godot", &godot])
+        .arg(project.root())
+        .output()
+        .expect("CLI starts");
+
+    assert!(
+        output.status.success(),
+        "check failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout is UTF-8");
+    assert!(stdout.contains("validate successfully with"));
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn check_accepts_res_relative_sources() {
+    let Some(godot) = godot() else {
+        return;
+    };
+    let Some(project) = TestProject::with_extension() else {
+        return;
+    };
+
+    let output = project
+        .godot_command("check", &godot)
+        .arg("res://theme.kdl")
+        .output()
+        .expect("CLI starts");
+
+    assert!(
+        output.status.success(),
+        "check failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn res_relative_symlink_escape_is_rejected() {
+    use std::os::unix::fs::symlink;
+
+    let project = TestProject::minimal();
+    let outside = TempDirBuilder::new()
+        .prefix("themosis-cli-outside-")
+        .tempdir()
+        .expect("outside directory is created");
+    std::fs::write(outside.path().join("escaped.kdl"), "theme Escaped {}\n")
+        .expect("outside theme is written");
+    symlink(outside.path(), project.path().join("linked")).expect("escape symlink is created");
+
+    let output = project
+        .godot_command("check", "godot")
+        .arg("res://linked/escaped.kdl")
+        .output()
+        .expect("CLI starts");
+
+    assert!(!output.status.success());
+    let message = stderr(&output);
+    assert!(
+        message.contains("outside Godot project"),
+        "unexpected error: {message}"
+    );
+}
+
+#[test]
+fn build_writes_a_loadable_theme_without_runtime_dependency() {
+    let Some(godot) = godot() else {
+        return;
+    };
+    let Some(project) = TestProject::with_extension() else {
+        return;
+    };
+    let generated = project.build(&godot, &project.output());
+    assert!(
+        generated.status.success(),
+        "build failed:\n{}",
+        String::from_utf8_lossy(&generated.stderr)
+    );
+    let source = std::fs::read_to_string(project.output()).expect("theme file was generated");
+    assert!(source.starts_with("[gd_resource type=\"Theme\""));
+    assert!(source.contains("Probe/base_type = &\"Button\""));
+    assert!(source.contains("Probe/font_sizes/font_size = 17"));
+
+    // A clean project without the addon can load the artifact.
+    let clean = TestProject::minimal();
+    std::fs::create_dir_all(clean.path().join("generated")).expect("output directory is created");
+    std::fs::copy(project.output(), clean.path().join("generated/theme.tres"))
+        .expect("theme is copied into the clean project");
+    std::fs::write(
+        clean.path().join("verify.gd"),
+        "extends SceneTree\nfunc _initialize() -> void:\n\tvar theme := ResourceLoader.load(\"res://generated/theme.tres\") as Theme\n\tif theme == null:\n\t\tquit(1)\n\t\treturn\n\tif theme.get_font_size(\"font_size\", \"Probe\") != 17:\n\t\tquit(1)\n\t\treturn\n\tquit()\n",
+    )
+    .expect("verification script is written");
+    let verification = Command::new(&godot)
+        .args(["--headless", "--path"])
+        .arg(clean.path())
+        .arg("--log-file")
+        .arg(clean.path().join("verify.log"))
+        .args(["--script", "res://verify.gd"])
+        .output()
+        .expect("Godot starts");
+    assert!(
+        verification.status.success(),
+        "generated theme did not load without the addon:\n{}\n{}",
+        String::from_utf8_lossy(&verification.stdout),
+        String::from_utf8_lossy(&verification.stderr),
+    );
+}
+
+#[test]
+fn unknown_target_is_reported_with_context() {
+    let Some(godot) = godot() else {
+        return;
+    };
+    let Some(project) = TestProject::with_extension() else {
+        return;
+    };
+    project.write_theme("NotAGodotControl", "normal");
+
+    let output = project.check(&godot);
+
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("[unknown_target style=Probe target=NotAGodotControl]"));
+}
+
+#[test]
+fn unsupported_property_is_reported_with_context() {
+    let Some(godot) = godot() else {
+        return;
+    };
+    let Some(project) = TestProject::with_extension() else {
+        return;
+    };
+    project.write_theme("Button", "not_a_theme_item");
+
+    let output = project.check(&godot);
+
+    assert!(!output.status.success());
+    let message = stderr(&output);
+    assert!(
+        message
+            .contains("[unsupported_property style=Probe target=Button property=not_a_theme_item]")
+    );
+    assert!(message.contains("has no compatible color item"));
+}
+
+#[test]
+fn color_rejects_a_non_flat_default_stylebox() {
+    let Some(godot) = godot() else {
+        return;
+    };
+    let Some(project) = TestProject::with_extension() else {
+        return;
+    };
+    project.write_theme("HSeparator", "separator");
+
+    let output = project.check(&godot);
+
+    assert!(!output.status.success());
+    let message = stderr(&output);
+    assert!(
+        message
+            .contains("[incompatible_stylebox style=Probe target=HSeparator property=separator]")
+    );
+    assert!(message.contains("a color can only modify StyleBoxFlat"));
+}
+
+#[test]
+fn resource_type_mismatch_is_reported() {
+    let Some(godot) = godot() else {
+        return;
+    };
+    let Some(project) = TestProject::with_extension() else {
+        return;
+    };
+    std::fs::write(
+        project.path().join("not_a_font.tres"),
+        "[gd_resource type=\"StyleBoxFlat\" format=3]\n\n[resource]\nbg_color = Color(1, 0, 0, 1)\n",
+    )
+    .expect("non-font resource is written");
+    project.write_resource_theme("Label", "font", "res://not_a_font.tres");
+
+    let output = project.check(&godot);
+
+    assert!(!output.status.success());
+    let message = stderr(&output);
+    assert!(message.contains("[resource_type style=Probe target=Label property=font]"));
+    assert!(message.contains("must inherit Font"));
+}
+
+#[test]
+fn exact_version_mismatch_preserves_existing_output() {
+    let Some(godot) = godot() else {
+        return;
+    };
+    let Some(project) = TestProject::with_extension() else {
+        return;
+    };
+    let output_path = project.output();
+    std::fs::create_dir_all(output_path.parent().expect("output has a parent"))
+        .expect("output directory is created");
+    let previous = "previous theme output\n";
+    std::fs::write(&output_path, previous).expect("previous output is written");
+
+    let result = project
+        .godot_command("build", &godot)
+        .args(["--require-version", "0.0.0", "--output"])
+        .arg(&output_path)
+        .arg(project.root())
+        .output()
+        .expect("CLI starts");
+
+    assert!(!result.status.success());
+    assert!(stderr(&result).contains("[godot_version_mismatch]"));
+    assert_eq!(
+        std::fs::read_to_string(&output_path).expect("previous output remains readable"),
+        previous,
+    );
+}
+
+#[test]
+fn runtime_mapping_failure_is_structured_and_preserves_output() {
+    let Some(godot) = godot() else {
+        return;
+    };
+    let Some(project) = TestProject::with_extension() else {
+        return;
+    };
+    let generated = project.build(&godot, &project.output());
+    assert!(
+        generated.status.success(),
+        "build failed:\n{}",
+        String::from_utf8_lossy(&generated.stderr)
+    );
+    let previous = std::fs::read_to_string(project.output()).expect("theme file was generated");
+    project.write_theme("Button", "not_a_theme_item");
+
+    let failed = project.build(&godot, &project.output());
+
+    assert!(!failed.status.success());
+    assert!(
+        stderr(&failed)
+            .contains("[unsupported_property style=Probe target=Button property=not_a_theme_item]")
+    );
+    assert_eq!(
+        std::fs::read_to_string(project.output()).expect("previous output remains readable"),
+        previous,
+    );
+}
+
+#[test]
+fn cli_checks_without_an_application_scene() {
+    let Some(godot) = godot() else {
+        return;
+    };
+    let Some(project) = TestProject::with_extension() else {
+        return;
+    };
+    std::fs::write(
+        project.path().join("project.godot"),
+        "[application]\nconfig/name=\"Themosis CLI test\"\n",
+    )
+    .expect("scene-free project");
+    let checked = project
+        .godot_command("check", &godot)
+        // A cold project start (engine boot, extension load, first scan) can
+        // exceed a few seconds on a loaded machine; timeout enforcement itself
+        // is covered by `godot_timeout_stops_a_stalled_runtime`.
+        .args(["--timeout", "30"])
+        .arg(project.root())
+        .output()
+        .expect("CLI starts");
+    assert!(checked.status.success(), "{}", stderr(&checked));
+    assert!(project.build(&godot, &project.output()).status.success());
+}
+
+#[test]
+fn cli_preserves_kdl_source_spans() {
+    let Some(godot) = godot() else {
+        return;
+    };
+    let Some(project) = TestProject::with_extension() else {
+        return;
+    };
+    std::fs::write(
+        project.root(),
+        "theme Broken {\n style Probe target=Button {\n number font_size [\n }\n}\n",
+    )
+    .expect("invalid source");
+    let result = project.check(&godot);
+    assert!(!result.status.success());
+    assert!(stderr(&result).contains("at bytes"), "{}", stderr(&result));
+}
+
+#[test]
+fn cli_replacement_does_not_consume_another_output() {
+    let Some(godot) = godot() else {
+        return;
+    };
+    let Some(project) = TestProject::with_extension() else {
+        return;
+    };
+    let sibling = project.path().join("generated/theme.themosis-tmp.tres");
+    assert!(project.build(&godot, &sibling).status.success());
+    let contents = std::fs::read(&sibling).expect("first output");
+    assert!(project.build(&godot, &project.output()).status.success());
+    assert_eq!(
+        std::fs::read(&sibling).expect("first output survives"),
+        contents
+    );
+    assert!(project.build(&godot, &project.output()).status.success());
+    assert_eq!(
+        std::fs::read(&sibling).expect("first output survives replacement"),
+        contents
+    );
 }
