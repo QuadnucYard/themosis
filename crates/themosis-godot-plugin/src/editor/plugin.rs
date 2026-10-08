@@ -30,7 +30,7 @@ use crate::{
         DEPENDENCIES_META, DEPENDENCY_FINGERPRINT_META, content_hash, fingerprint_snapshot,
         load_imported_theme, meta_string, meta_string_array,
     },
-    project::sources,
+    project::{config, sources},
 };
 
 /// Godot-facing editor plugin coordinating the importer and the reimport
@@ -59,6 +59,8 @@ pub struct ThemosisEditorPlugin {
 #[godot_api]
 impl IEditorPlugin for ThemosisEditorPlugin {
     fn enter_tree(&mut self) {
+        config::ensure_project_setting();
+
         let importer = ThemosisThemeImporter::new_gd();
         importer
             .signals()
@@ -89,7 +91,7 @@ impl IEditorPlugin for ThemosisEditorPlugin {
             .base()
             .get_editor_interface()
             .and_then(|editor| editor.get_resource_filesystem());
-        let filesystem_handle = filesystem.clone().map(|filesystem| {
+        let filesystem_handle = filesystem.as_ref().map(|filesystem| {
             filesystem
                 .signals()
                 .filesystem_changed()
@@ -133,7 +135,7 @@ impl ThemosisEditorPlugin {
         // Registering an importer normally schedules discovery. An explicit
         // scan also handles .tms files that predate plugin activation.
         self.waiting_for_initial_scan = true;
-        if let Some(mut filesystem) = self.filesystem.clone() {
+        if let Some(filesystem) = self.filesystem.as_mut() {
             filesystem.scan();
         }
     }
@@ -166,15 +168,14 @@ impl ThemosisEditorPlugin {
             return;
         }
         let mut digests = BTreeMap::new();
-        let sources = self.sources.clone();
-        for source in sources {
+        for source in &self.sources {
             let dependencies = self
                 .dependencies
-                .get(&source)
+                .get(source)
                 .cloned()
                 .unwrap_or_else(|| vec![source.clone()]);
             let current = snapshot(&dependencies, &mut digests);
-            let previous = self.snapshots.get(&source).cloned().unwrap_or_default();
+            let previous = self.snapshots.get(source).cloned().unwrap_or_default();
             if current == previous {
                 continue;
             }
@@ -182,7 +183,7 @@ impl ThemosisEditorPlugin {
             self.pending_reimports.insert(source.clone());
         }
         if !self.pending_reimports.is_empty()
-            && let Some(mut refresh_timer) = self.refresh_timer.clone()
+            && let Some(refresh_timer) = self.refresh_timer.as_mut()
         {
             refresh_timer.start();
         }
@@ -255,8 +256,8 @@ impl ThemosisEditorPlugin {
         let source = source.to_string();
         let report = self
             .importer
-            .clone()
-            .and_then(|mut importer| importer.bind_mut().take_report(&source));
+            .as_mut()
+            .and_then(|importer| importer.bind_mut().take_report(&source));
         self.reimported.insert(source.clone());
         let outcome = match report {
             Some(report) => report_outcome(report),
@@ -276,8 +277,8 @@ impl ThemosisEditorPlugin {
 
     fn reimport_all(&mut self) {
         self.refresh_sources();
-        for source in self.sources.clone() {
-            self.pending_reimports.insert(source);
+        for source in &self.sources {
+            self.pending_reimports.insert(source.clone());
         }
         self.reimport_pending();
     }
@@ -286,22 +287,22 @@ impl ThemosisEditorPlugin {
         if self.reimporting || self.pending_reimports.is_empty() {
             return;
         }
-        let Some(filesystem) = self.filesystem.clone() else {
+        let Some(filesystem) = self.filesystem.as_mut() else {
             return;
         };
         for source in &self.pending_reimports {
-            if filesystem.clone().get_file_type(source.as_str()).is_empty() {
+            if filesystem.get_file_type(source.as_str()).is_empty() {
                 // Startup discovery has not registered this source yet. Keep
                 // the request queued until the filesystem scan completes.
-                if let Some(mut refresh_timer) = self.refresh_timer.clone() {
+                if let Some(refresh_timer) = self.refresh_timer.as_mut() {
                     refresh_timer.start();
                 }
                 return;
             }
         }
         let mut sources = Vec::new();
-        for source in self.sources.clone() {
-            if self.pending_reimports.contains(&source) {
+        for source in &self.sources {
+            if self.pending_reimports.contains(source) {
                 sources.push(source);
             }
         }
@@ -311,7 +312,7 @@ impl ThemosisEditorPlugin {
         }
         self.reimported.clear();
         self.reimporting = true;
-        if let Some(mut button) = self.button.clone() {
+        if let Some(button) = self.button.as_mut() {
             button.set_disabled(true);
             button.set_text("Importing Themosis…");
         }
@@ -319,9 +320,9 @@ impl ThemosisEditorPlugin {
         for source in &sources {
             packed.push(source.as_str());
         }
-        filesystem.clone().reimport_files(&packed);
+        filesystem.reimport_files(&packed);
         self.reimported.clear();
-        if let Some(mut button) = self.button.clone() {
+        if let Some(button) = self.button.as_mut() {
             button.set_disabled(false);
             button.set_text("Reimport Themosis");
         }

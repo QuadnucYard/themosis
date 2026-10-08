@@ -48,6 +48,13 @@ pub(crate) fn save_theme(theme: &Gd<Theme>, output: &str) -> Result<(), Box<Runn
     })
 }
 
+/// Saves a validated profile configuration through the same replacement policy.
+pub(crate) fn save_profile_config(text: &str, output: &str) -> Result<(), Box<RunnerDiagnostic>> {
+    write_output(output, "json", |temporary| {
+        fs::write(temporary, text).map_err(|error| failure("save_failed", error))
+    })
+}
+
 fn write_output(
     output: &str,
     extension: &str,

@@ -4,6 +4,7 @@
 
 mod backend;
 mod errors;
+pub mod profiles;
 pub mod reports;
 pub mod runner;
 

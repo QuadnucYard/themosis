@@ -6,10 +6,11 @@
 //!
 //! - [`native`]: engine-side services — native theme construction, generation,
 //!   persistence, diagnostics, and the imported-artifact cache contract.
-//! - [`project`]: project state — source discovery and the `res://` source
-//!   provider.
+//! - [`project`]: project state — source discovery, profile configuration, and
+//!   the `res://` source provider.
 //! - [`editor`]: the auto-registered editor plugin and its importer.
-//! - [`runners`]: native main loops for the CLI protocol and the import gate.
+//! - [`runners`]: native main loops for the CLI protocol, profile builds, and
+//!   the import gate.
 //!
 //! The dependency rule is one-way: `editor` and `runners` use `native` and
 //! `project` services; those service layers never depend on editor classes.

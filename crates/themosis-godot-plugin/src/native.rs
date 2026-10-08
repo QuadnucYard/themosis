@@ -5,6 +5,7 @@
 //! services, never the other way around.
 
 pub(crate) mod backend;
+pub(crate) mod builder;
 pub(crate) mod diagnostics;
 pub(crate) mod generation;
 pub(crate) mod import_cache;
